@@ -1,0 +1,25 @@
+[package]
+name = "knfsolv"
+version = "0.1.0"
+edition = "2024"
+description = "Opponent-aware Kniffel analysis and terminal score sheet"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4.6", features = ["derive"] }
+crossterm = "0.28"
+ratatui = "0.29"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["float_roundtrip"] }
+thiserror = "2.0"
+rand = "0.8"
+rand_chacha = "0.3"
+tempfile = "3.27"
+eframe = { version = "0.34.1", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "accesskit"], optional = true }
+
+[features]
+default = ["gui"]
+gui = ["dep:eframe"]
+
+[profile.release]
+lto = "thin"

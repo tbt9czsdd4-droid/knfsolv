@@ -1,0 +1,16 @@
+{
+  "position": {
+    "schema_version": 1,
+    "rules_version": "schmidt_pdf_2024_standard_v1",
+    "players": [
+      {"name": "You", "sheet": {"cells": [2,6,12,8,15,24,null,null,null,null,null,null,null], "extra_kniffels": 0}},
+      {"name": "Anna", "sheet": {"cells": [3,8,6,12,20,12,null,null,null,null,null,null,null], "extra_kniffels": 0}},
+      {"name": "Ben", "sheet": {"cells": [4,4,9,16,10,18,null,null,null,null,null,null,null], "extra_kniffels": 0}},
+      {"name": "Clara", "sheet": {"cells": [2,6,12,8,15,24,null,null,null,null,null,null,null], "extra_kniffels": 0}}
+    ],
+    "turn_order": [0,1,2,3], "active_player": 0,
+    "phase": {"type": "decision", "dice": [0,1,3,0,0,1], "rerolls_left": 1},
+    "hypothetical": false
+  },
+  "settings": {"time_ms": 2000, "simulations": 20000}
+}

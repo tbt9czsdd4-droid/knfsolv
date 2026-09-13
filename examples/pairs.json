@@ -1,0 +1,15 @@
+{
+  "position": {
+    "schema_version": 1,
+    "rules_version": "schmidt_pdf_2024_standard_v1",
+    "players": [
+      {"name": "You", "sheet": {"cells": [null,null,null,null,null,null,null,null,null,null,null,null,null], "extra_kniffels": 0}},
+      {"name": "Opponent", "sheet": {"cells": [null,null,null,null,null,null,null,null,null,null,null,null,null], "extra_kniffels": 0}}
+    ],
+    "turn_order": [0,1],
+    "active_player": 0,
+    "phase": {"type": "decision", "dice": [2,1,0,0,2,0], "rerolls_left": 2},
+    "hypothetical": false
+  },
+  "settings": {"time_ms": 2000, "simulations": 20000}
+}

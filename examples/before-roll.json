@@ -1,0 +1,64 @@
+{
+  "position": {
+    "schema_version": 1,
+    "rules_version": "schmidt_pdf_2024_standard_v1",
+    "players": [
+      {
+        "name": "Player 1",
+        "sheet": {
+          "cells": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            18,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "extra_kniffels": 0
+        }
+      },
+      {
+        "name": "Player 2",
+        "sheet": {
+          "cells": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "extra_kniffels": 0
+        }
+      }
+    ],
+    "turn_order": [
+      0,
+      1
+    ],
+    "active_player": 1,
+    "phase": {
+      "type": "before_first_roll"
+    },
+    "hypothetical": false
+  },
+  "settings": {
+    "time_ms": 2000,
+    "simulations": 20000,
+    "perspective": 1
+  }
+}

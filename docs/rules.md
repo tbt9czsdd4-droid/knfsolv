@@ -1,0 +1,27 @@
+# Standard Kniffel rules used by the engine
+
+Source: the standard section of the supplied [Schmidt rulebook](../49030_Kniffel_DE.pdf), PDF pages 2–3. Saved positions use `schmidt_pdf_2024_standard_v1`.
+
+| JSON index / TUI number | Category | Points |
+| --- | --- | --- |
+| 0–5 / 1–6 | Ones through Sixes | Sum of that face |
+| 6 / 7 | Three of a kind | Sum of all five dice if at least three equal |
+| 7 / 8 | Four of a kind | Sum of all five dice if at least four equal |
+| 8 / 9 | Full House | 25 for a triple and a different pair |
+| 9 / 10 | Small Straight | 30 for four distinct consecutive faces |
+| 10 / 11 | Large Straight | 40 for five distinct consecutive faces |
+| 11 / 12 | Kniffel | 50 for five equal dice |
+| 12 / 13 | Chance | Sum of all five dice |
+
+The upper section earns 35 extra points once its subtotal reaches 63. A large straight also satisfies the small-straight condition. Duplicate dice do not invalidate an otherwise present small straight. Five equal dice are not an ordinary Full House.
+
+Each turn starts with five dice and allows up to two rerolls. Any subset can be rerolled, and previously retained dice may be released at a later decision. Scoring early is allowed. Each turn consumes one open category, including a zero entry. The game ends when everyone's 13 categories are filled.
+
+An eligible additional Kniffel earns 50 extra points plus the maximum in any open category, regardless of face: upper entries are five times the category face; Three/Four of a Kind and Chance are 30; Full House and straights use their fixed points. The extra bonus is awarded once on scoring the turn. Retaining the same five dice does not repeatedly award it.
+
+Two conventions make underspecified wording in the PDF explicit:
+
+1. Additional-Kniffel eligibility requires **50 already entered in Kniffel**. Crossing out Kniffel disables extra bonuses. A previous five-of-a-kind entered elsewhere does not establish eligibility. The PDF does not spell out these history cases; this is the documented implementation convention.
+2. A nonmatching category receives zero. A positive matching entry cannot voluntarily be replaced with zero. Chance always matches a five-dice roll. This is the plan's standard-rule interpretation.
+
+`null` in a saved sheet means open; `0` means filled for zero. `extra_kniffels` counts additional awards, not all five-of-a-kind throws and not points. Totals and the upper bonus are derived. Input validation checks category score possibilities, bonus consistency, phases, and ordinary turn counts. Without a complete move history it cannot prove that every entered sheet was reached in actual play.
