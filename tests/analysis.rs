@@ -155,6 +155,24 @@ fn provisional_baseline_is_immediate_and_auto_exact_stops_computation() {
 }
 
 #[test]
+fn bounded_exact_attempt_is_not_cut_to_one_work_slice() {
+    // Two open categories in all, before the roll: solved exactly in milliseconds, but not in
+    // the 1 ms slice an earlier version also imposed on the exact attempt.
+    let mut p = Position::new(2);
+    for (player, open) in p.players.iter_mut().zip([11, 12]) {
+        player.sheet.cells = [Some(0); 13];
+        player.sheet.cells[open] = None;
+    }
+    let mut session = AnalysisSession::new(p, Settings::default()).unwrap();
+    session.advance(WorkSlice {
+        max_time: Duration::from_millis(1),
+        ..WorkSlice::default()
+    });
+    assert!(session.finished());
+    assert_eq!(session.snapshot().status, "exact_under_model");
+}
+
+#[test]
 fn auto_uses_a_fixed_policy_after_an_incomplete_bounded_exact_attempt() {
     let mut session = AnalysisSession::new(
         fixture(),

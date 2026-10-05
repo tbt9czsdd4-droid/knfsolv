@@ -2,9 +2,13 @@
 //! test on a phone.
 
 #[cfg(target_arch = "wasm32")]
+mod computation;
+#[cfg(target_arch = "wasm32")]
 mod keyboard;
 #[cfg(target_arch = "wasm32")]
 mod page;
+#[cfg(any(target_arch = "wasm32", test))]
+mod protocol;
 // Natively the speed test runs here; in the browser in `src/bin/speed-worker.rs`.
 #[cfg(not(target_arch = "wasm32"))]
 mod speed;
@@ -34,6 +38,7 @@ fn main() {
             .and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok())
             .expect("index.html contains <canvas id=\"app\">");
         let (session, path) = startup_session();
+        let debug = query().contains("debug");
         let text_fields = keyboard::Shared::default();
         if let Err(error) = keyboard::install(&canvas, text_fields.clone()) {
             log::warn!("Keyboard helper unavailable: {error:?}");
@@ -43,14 +48,22 @@ fn main() {
                 canvas,
                 eframe::WebOptions::default(),
                 Box::new(move |_cc| {
+                    let mut computation = None;
+                    // Preferences last for the visit until browser storage (Phase 3).
+                    let desktop = knfsolv::gui::Desktop::startup_with(
+                        session,
+                        path,
+                        knfsolv::persistence::MemoryStorage::default(),
+                        |wake| {
+                            let worker = computation::WorkerComputation::start(wake);
+                            computation = Some(worker.clone());
+                            Box::new(worker)
+                        },
+                    );
                     Ok(Box::new(WebApp {
-                        // Preferences last for the visit until browser storage (Phase 3).
-                        desktop: knfsolv::gui::Desktop::startup_with_preferences(
-                            session,
-                            path,
-                            knfsolv::persistence::MemoryStorage::default(),
-                        ),
+                        desktop,
                         text_fields,
+                        debug: computation.filter(|_| debug),
                     }))
                 }),
             )
@@ -67,6 +80,8 @@ fn main() {
 struct WebApp {
     desktop: knfsolv::gui::Desktop,
     text_fields: keyboard::Shared,
+    /// `?debug` shows worker diagnostics and a button that crashes the worker.
+    debug: Option<computation::WorkerComputation>,
 }
 #[cfg(target_arch = "wasm32")]
 impl eframe::App for WebApp {
@@ -75,24 +90,56 @@ impl eframe::App for WebApp {
     }
 
     fn ui(&mut self, ui: &mut eframe::egui::Ui, frame: &mut eframe::Frame) {
+        use eframe::egui;
         self.desktop.ui(ui, frame);
+        if let Some(computation) = &self.debug {
+            egui::Area::new(egui::Id::new("worker_debug"))
+                .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-8.0, -8.0))
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        let (crashes, reports, hidden) = computation.diagnostics();
+                        ui.label(format!(
+                            "Worker: {crashes} Abstürze · {reports} Berichte{}",
+                            if hidden { " · pausiert" } else { "" }
+                        ));
+                        if ui.button("Worker abstürzen lassen").clicked() {
+                            computation.crash_worker();
+                        }
+                    });
+                });
+        }
         keyboard::record(ui.ctx(), &self.text_fields);
     }
 }
 
-/// `?bench` opens a fixed two-player opening (1 1 2 5 5, two rerolls) to compare device speed.
+/// Test positions that open straight in the analyzer: `?bench`, a two-player opening
+/// (1 1 2 5 5, two rerolls) to compare device speed, and `?endgame`, one player with only
+/// Dreierpasch and Kniffel open, which the exact solver needs about 0.1–0.4 s for.
 #[cfg(target_arch = "wasm32")]
 fn startup_session() -> (knfsolv::persistence::Session, Option<std::path::PathBuf>) {
-    let bench = query().contains("bench");
-    let mut session = knfsolv::persistence::Session::new(2);
-    if !bench {
-        return (session, None);
+    use knfsolv::{dice::Dice, persistence::Session, state::Phase};
+    let query = query();
+    if query.contains("bench") {
+        let mut session = Session::new(2);
+        session.position.phase = Phase::Decision {
+            dice: Dice([2, 1, 0, 0, 2, 0]),
+            rerolls_left: 2,
+        };
+        return (session, Some("benchmark.json".into()));
     }
-    session.position.phase = knfsolv::state::Phase::Decision {
-        dice: knfsolv::dice::Dice([2, 1, 0, 0, 2, 0]),
-        rerolls_left: 2,
-    };
-    (session, Some("benchmark.json".into()))
+    if query.contains("endgame") {
+        let mut session = Session::new(1);
+        let sheet = &mut session.position.players[0].sheet;
+        sheet.cells = [Some(0); 13];
+        sheet.cells[6] = None;
+        sheet.cells[11] = None;
+        session.position.phase = Phase::Decision {
+            dice: Dice([0, 1, 1, 0, 0, 3]),
+            rerolls_left: 2,
+        };
+        return (session, Some("endgame.json".into()));
+    }
+    (Session::new(2), None)
 }
 
 #[cfg(target_arch = "wasm32")]

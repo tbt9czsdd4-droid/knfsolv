@@ -53,7 +53,9 @@ trunk serve --release   # http://127.0.0.1:8080
 
 Phones need the HTTPS address: iOS 27 runs plain-HTTP pages from LAN addresses without its JavaScript and WebAssembly compiler, which makes the solver about 35 times slower. `serve-lan.sh` creates a self-signed certificate in `web/.tls/`; Safari warns once per certificate, continue with *Details einblenden* → *diese Website besuchen*.
 
-`?bench` opens a fixed opening position in the analyzer. `?speed` (or `?speed=<games>`) runs a speed test without the interface: timing checks and a fixed number of solver games in a Web Worker. `cargo run --release -p knfsolv-web -- speed` runs the same test natively for comparison. Analysis in the interface currently runs in short slices on the page's main thread. Saving files is unavailable, and preferences last only for the visit.
+Analysis runs in a Web Worker (`web/src/bin/worker.rs`), so the page stays responsive; the worker restarts by itself after a crash and pauses while the page is hidden. Saving files is unavailable, and preferences last only for the visit.
+
+Test addresses: `?bench` opens a two-player opening in the analyzer, `?endgame` a one-player endgame that is solved exactly, and `?debug` adds worker diagnostics with a button that crashes the worker. `?speed` (or `?speed=<games>`) runs a speed test without the interface: timing checks and a fixed number of solver games in the worker. `cargo run --release -p knfsolv-web -- speed` runs the same test natively for comparison.
 
 For a terminal-only build without graphical dependencies:
 

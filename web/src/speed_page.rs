@@ -1,6 +1,9 @@
-//! `?speed` or `?speed=<games>`: timing checks and solver games in a Web Worker
-//! (`src/bin/speed-worker.rs`), shown as plain text instead of the app.
-use crate::page;
+//! `?speed` or `?speed=<games>`: timing checks and solver games in the analysis worker
+//! (`src/bin/worker.rs`), shown as plain text instead of the app.
+use crate::{
+    page,
+    protocol::{self, FromWorker, ToWorker},
+};
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
@@ -44,30 +47,41 @@ pub async fn run(games: u64) {
     show();
 }
 
-/// The worker posts `true` once it listens, then one string per line, then `null`.
 async fn run_worker(
     games: u64,
     lines: Rc<RefCell<Vec<String>>>,
     show: Rc<dyn Fn()>,
 ) -> Result<(), JsValue> {
-    let worker = web_sys::Worker::new("./speed-worker_loader.js")?;
+    let worker = web_sys::Worker::new("./worker_loader.js")?;
     let done = js_sys::Promise::new(&mut |resolve, reject| {
         let (target, lines, show) = (worker.clone(), lines.clone(), show.clone());
+        worker.set_onerror(Some(&reject));
         let on_message =
             Closure::<dyn Fn(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
-                let data = event.data();
-                if data.as_bool() == Some(true) {
-                    let _ = target.post_message(&JsValue::from_f64(games as f64));
-                } else if let Some(line) = data.as_string() {
-                    lines.borrow_mut().push(line);
-                    show();
-                } else {
-                    let _ = resolve.call0(&JsValue::NULL);
+                let message = event
+                    .data()
+                    .as_string()
+                    .map(|json| protocol::decode::<FromWorker>(&json));
+                match message {
+                    Some(Ok(FromWorker::Ready { .. })) => {
+                        let request = protocol::encode(&ToWorker::SpeedTest { games });
+                        let _ = target.post_message(&JsValue::from_str(&request));
+                    }
+                    Some(Ok(FromWorker::Line(line))) => {
+                        lines.borrow_mut().push(line);
+                        show();
+                    }
+                    Some(Ok(FromWorker::SpeedDone)) => {
+                        let _ = resolve.call0(&JsValue::NULL);
+                    }
+                    Some(Ok(FromWorker::Panicked(details))) => {
+                        let _ = reject.call1(&JsValue::NULL, &JsValue::from_str(&details));
+                    }
+                    _ => {}
                 }
             });
         worker.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
         on_message.forget();
-        worker.set_onerror(Some(&reject));
     });
     let result = wasm_bindgen_futures::JsFuture::from(done).await;
     worker.terminate();

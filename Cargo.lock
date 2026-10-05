@@ -1798,6 +1798,8 @@ dependencies = [
  "js-sys",
  "knfsolv",
  "log",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

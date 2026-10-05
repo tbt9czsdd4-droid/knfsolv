@@ -33,6 +33,9 @@ impl WorkSlice {
     }
 }
 
+/// The longest bounded exact attempt before Auto falls back to rollouts.
+const EXACT_ATTEMPT: Duration = Duration::from_millis(500);
+
 pub struct AnalysisSession {
     position: Position,
     settings: Settings,
@@ -121,18 +124,16 @@ impl AnalysisSession {
         if self.exact_pending {
             // Exact is a single bounded attempt, not a changing rollout policy. Publish the
             // provisional snapshot before this call; sampled evidence has not started yet.
+            // It may outlast the slice: small endgames need a few hundred milliseconds, and
+            // cancellation still interrupts it.
             let mut settings = self.settings.clone();
             settings.method = Method::Exact;
             let remaining = if !self.continuous && self.settings.time_ms > 0 {
                 Duration::from_millis(self.settings.time_ms).saturating_sub(self.elapsed)
             } else {
-                Duration::from_millis(500)
+                EXACT_ATTEMPT
             };
-            settings.time_ms = remaining
-                .min(slice.max_time)
-                .min(Duration::from_millis(500))
-                .as_millis()
-                .max(1) as u64;
+            settings.time_ms = remaining.min(EXACT_ATTEMPT).as_millis().max(1) as u64;
             let mut report = analyze(&self.position, &settings, cancel.clone())
                 .expect("validated analysis session");
             report.settings = self.settings.clone();

@@ -1,7 +1,7 @@
 //! Native desktop presentation. Domain decisions stay in the shared engine.
 use crate::{
     Error, Result,
-    coaching::{AnalysisKey, AnalysisRequest, AnalysisUpdate, Computation, ComputationWorker},
+    coaching::{AnalysisKey, AnalysisRequest, AnalysisUpdate, Computation, Wake},
     game::{
         AnalysisMode, AutomaticStep, ComputerGameConfig, ComputerPolicy, DesktopGame, DiceSource,
         GameController, JobPurpose, LocalGameConfig, PlayerControl,
@@ -348,7 +348,19 @@ fn snapshot(session: &Session) -> String {
 }
 
 impl Desktop {
-    pub fn new(mut session: Session, path: Option<PathBuf>) -> Self {
+    /// Analyses run on a native worker thread.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new(session: Session, path: Option<PathBuf>) -> Self {
+        Self::with_computation(session, path, |wake| {
+            Box::new(crate::coaching::ComputationWorker::new(wake))
+        })
+    }
+    /// `computation` receives the wake-up that repaints the interface when reports arrive.
+    pub fn with_computation(
+        mut session: Session,
+        path: Option<PathBuf>,
+        computation: impl FnOnce(Wake) -> Box<dyn Computation>,
+    ) -> Self {
         if path.is_none() && session.desktop.is_none() {
             session.desktop = Some(DesktopGame::new(
                 session.position.players.len(),
@@ -358,7 +370,7 @@ impl Desktop {
         }
         let repaint: Arc<Mutex<Option<egui::Context>>> = Arc::new(Mutex::new(None));
         let wake = repaint.clone();
-        let worker = Box::new(ComputationWorker::new(move || {
+        let worker = computation(Box::new(move || {
             if let Some(ctx) = &*wake.lock().unwrap() {
                 ctx.request_repaint();
             }
@@ -422,16 +434,20 @@ impl Desktop {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn startup(session: Session, path: Option<PathBuf>) -> Self {
         let preferences = crate::persistence::FileStorage(crate::preferences::path());
-        Self::startup_with_preferences(session, path, preferences)
+        Self::startup_with(session, path, preferences, |wake| {
+            Box::new(crate::coaching::ComputationWorker::new(wake))
+        })
     }
-    pub fn startup_with_preferences(
+    /// Startup with the platform's preference storage and analysis computation.
+    pub fn startup_with(
         session: Session,
         path: Option<PathBuf>,
         preferences: impl crate::persistence::Storage + 'static,
+        computation: impl FnOnce(Wake) -> Box<dyn Computation>,
     ) -> Self {
         let show_home = path.is_none();
         let players = session.position.players.len();
-        let mut app = Self::new(session, path);
+        let mut app = Self::with_computation(session, path, computation);
         app.analysis_players = players;
         app.local_setup.names = (0..players.clamp(2, 8))
             .map(|i| format!("Player {}", i + 1))
@@ -2441,10 +2457,11 @@ mod tests {
         p.analysis_paused = true;
         p.theme = crate::preferences::Theme::Light;
         crate::persistence::save_json(&prefs_path, &p).unwrap();
-        let mut app = Desktop::startup_with_preferences(
+        let mut app = Desktop::startup_with(
             session.clone(),
             Some(game_path.clone()),
             crate::persistence::FileStorage(prefs_path.clone()),
+            native_worker,
         );
         assert_eq!(app.game.session().settings.max_depth, 3);
         assert_eq!(app.game.session().settings.perspective, 1);
@@ -2486,10 +2503,11 @@ mod tests {
         ctx.set_theme(egui::ThemePreference::Light);
         app.persist_preferences(&ctx);
         drop(app); // Pending debounce is flushed on normal application destruction.
-        let restarted = Desktop::startup_with_preferences(
+        let restarted = Desktop::startup_with(
             Session::load(&game_path).unwrap(),
             Some(game_path),
             crate::persistence::FileStorage(prefs_path),
+            native_worker,
         );
         assert_eq!(restarted.game.session().settings.max_depth, 5);
         assert!(restarted.analysis_paused);
@@ -2543,7 +2561,10 @@ mod tests {
     fn startup(session: Session, path: Option<PathBuf>) -> Desktop {
         let dir = tempfile::tempdir().unwrap();
         let preferences = crate::persistence::FileStorage(dir.keep().join("preferences.json"));
-        Desktop::startup_with_preferences(session, path, preferences)
+        Desktop::startup_with(session, path, preferences, native_worker)
+    }
+    fn native_worker(wake: Wake) -> Box<dyn Computation> {
+        Box::new(crate::coaching::ComputationWorker::new(wake))
     }
     #[test]
     fn background_is_opaque_and_covers_viewport_in_both_themes() {

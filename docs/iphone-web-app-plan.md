@@ -1,6 +1,6 @@
 # iPhone web app plan
 
-Status: Phases 0 and 1 done (2026-10-05; Pages deployment postponed); Phase 2 next. This replaces the earlier draft (commit `edcef33`).
+Status: Phases 0 and 1 done (2026-10-05; Pages deployment postponed); Phase 2 built, iPhone check pending. This replaces the earlier draft (commit `edcef33`).
 Sources: [the brainstorm](iphone-web-app-brainstorm.md), code inspection, and measurements taken on 2026-10-04 (section 3).
 
 ## 1. Goal
@@ -361,6 +361,15 @@ Estimates are focused working days. Each phase ends with something testable on t
 - Editing or Undo during analysis never shows old advice.
 - The two-open-category endgame from section 3 reports „exakt berechnet“.
 - A debug “crash worker” button recovers by itself.
+
+**Status (2026-10-05): built; iPhone check pending.**
+- `coaching::Scheduler` holds requests and their latest reports; `coaching::Runner` advances them one slice at a time. The native `ComputationWorker` drives both on its thread as before, and the UI-thread stepping stone is gone.
+- `web/src/bin/worker.rs` runs the same scheduler in a Web Worker and returns to its event loop after every 40 ms slice, so newer messages replace or pause work promptly. It also runs the `?speed` test, so there is one worker binary.
+- `web/src/computation.rs` is the page's `Computation`. It keeps its own `Scheduler` as the record of requests and accepted reports, replays the requests into every newly started worker, restarts a crashed worker, and after three crashes within a minute shows „Die Berechnung ist mehrmals abgestürzt“ with **Neu laden**. While the page is hidden, all requests are paused.
+- Messages (`web/src/protocol.rs`) are JSON strings with a protocol version; tests check that 64-bit keys and seeds and whole reports survive unchanged.
+- The bounded exact attempt now gets up to 500 ms instead of one slice, natively too. `?endgame` (one player, Dreierpasch and Kniffel open) reports „exact under model“ in the browser.
+- Headless Firefox at 390×844: analysis runs in the worker; `?debug`'s crash button restarts it twice without losing the advice, and a third crash shows the overlay; hiding the page stops reports until it is visible again.
+- Still to check on the iPhone: smooth scrolling during analysis, edits and Undo during analysis, `?endgame`, and the crash button.
 
 ### Phase 3 — Autosave, share, and open (1–2 days)
 

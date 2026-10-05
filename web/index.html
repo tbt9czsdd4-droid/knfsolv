@@ -7,7 +7,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Kniffel-Coach</title>
   <link data-trunk rel="rust" data-bin="knfsolv-web" data-type="main" data-wasm-opt="0">
-  <link data-trunk rel="rust" data-bin="speed-worker" data-type="worker" data-loader-shim data-wasm-opt="0">
+  <link data-trunk rel="rust" data-bin="worker" data-type="worker" data-wasm-opt="0">
+  <link data-trunk rel="copy-file" href="worker_loader.js">
   <style>
     /* Matches egui's panel colors, so loading flows into the interface without a flash. */
     :root { --bg: #f8f8f8; --fg: #222222; --muted: #6b6b6b; --accent: #2f6fd0; --track: #dddddd; }
