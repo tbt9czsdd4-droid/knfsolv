@@ -1,6 +1,6 @@
 # iPhone web app plan
 
-Status: Phases 0–2 done (2026-10-05; Pages deployment postponed); Phase 3 built, iPhone check pending. This replaces the earlier draft (commit `edcef33`).
+Status: Phases 0–3 done (2026-10-05; Pages deployment postponed); Phase 4 next. This replaces the earlier draft (commit `edcef33`).
 Sources: [the brainstorm](iphone-web-app-brainstorm.md), code inspection, and measurements taken on 2026-10-04 (section 3).
 
 ## 1. Goal
@@ -383,12 +383,13 @@ Estimates are focused working days. Each phase ends with something testable on t
 - Export → Files → import round-trips on the iPhone.
 - A phone export opens in the desktop app.
 
-**Status (2026-10-05): built; iPhone check pending.**
+**Status (2026-10-05): done.**
 - `Desktop::set_browser` switches the interface to browser behavior through the `gui::Browser` trait: *File* offers *Share position* and *Open position* instead of the path field, Save, and Load, and the start screen offers *Open position*. The "Unsaved" marker and the unsaved-changes dialog are gone; replacing a position with sheet entries asks once, "Discard the current position?". (These strings become German with the translation layer in Phase 4.)
 - `web/src/autosave.rs` stores `Desktop::autosave()`, the desktop save format, in `localStorage` 300 ms after each change, and at once when the page is hidden or the app panics; the crash overlay then says the position is saved. Partial dice entry and undo history stay in memory. Preferences use `localStorage` too, and the app asks for persistent storage.
 - The app reopens the last position. `?bench` and `?endgame` are never saved, so tests cannot replace the family's position.
 - `web/src/files.rs` shares through the share sheet when the browser can share files, otherwise as a download (`kniffel-stellung-<date>-<time>.json`); opening uses the file picker, rejects files over 1 MiB, and validates before anything is replaced.
 - GUI tests cover browser mode: no paths or unsaved prompts, sharing the desktop format (which the desktop app loads), the confirmation, and rejected files. Headless Firefox at 390×844: the position survives reloads, hiding the page saves a new score at once, the download is the desktop format, and an opened file replaces the position after the confirmation.
+- On the iPhone: the position survives force-quitting Safari, and *Share position* opens the share sheet. Not checked on the device yet: saving to Files and opening that file again, and a phone file in the desktop app. Sharing is expected to be rare.
 
 ### Phase 4 — Phone analyzer, German from the start (5–7 days)
 
