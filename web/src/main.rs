@@ -3,9 +3,13 @@
 
 #[cfg(target_arch = "wasm32")]
 mod keyboard;
-// In the browser, the speed test runs in `src/bin/speed-worker.rs`.
+#[cfg(target_arch = "wasm32")]
+mod page;
+// Natively the speed test runs here; in the browser in `src/bin/speed-worker.rs`.
 #[cfg(not(target_arch = "wasm32"))]
 mod speed;
+#[cfg(target_arch = "wasm32")]
+mod speed_page;
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
@@ -13,16 +17,14 @@ fn main() {
 
     let _ = eframe::WebLogger::init(log::LevelFilter::Info);
     let runner = eframe::WebRunner::new();
-    // Chain after eframe's handler: without a Mac there is no Safari console, so show panics.
+    // Chain after eframe's handler; without a Mac there is no Safari console, so show panics.
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         previous(info);
-        show_status(&format!(
-            "Die App ist abgestürzt.\nBitte die Seite neu laden.\n\n{info}"
-        ));
+        page::show_error("Die App ist abgestürzt.", &info.to_string());
     }));
-    if let Some(games) = speed_games() {
-        wasm_bindgen_futures::spawn_local(run_speed(games));
+    if let Some(games) = speed_page::requested(&query()) {
+        wasm_bindgen_futures::spawn_local(speed_page::run(games));
         return;
     }
     wasm_bindgen_futures::spawn_local(async move {
@@ -42,19 +44,20 @@ fn main() {
                 eframe::WebOptions::default(),
                 Box::new(move |_cc| {
                     Ok(Box::new(WebApp {
-                        desktop: knfsolv::gui::Desktop::startup(session, path),
+                        // Preferences last for the visit until browser storage (Phase 3).
+                        desktop: knfsolv::gui::Desktop::startup_with_preferences(
+                            session,
+                            path,
+                            knfsolv::persistence::MemoryStorage::default(),
+                        ),
                         text_fields,
                     }))
                 }),
             )
             .await;
         match result {
-            Ok(()) => {
-                if let Some(status) = status_element() {
-                    status.remove();
-                }
-            }
-            Err(error) => show_status(&format!("Die App konnte nicht starten.\n\n{error:?}")),
+            Ok(()) => page::hide_loading(),
+            Err(error) => page::show_error("Die App konnte nicht starten.", &format!("{error:?}")),
         }
     });
 }
@@ -93,100 +96,10 @@ fn startup_session() -> (knfsolv::persistence::Session, Option<std::path::PathBu
 }
 
 #[cfg(target_arch = "wasm32")]
-fn status_element() -> Option<web_sys::Element> {
-    web_sys::window()?.document()?.get_element_by_id("status")
-}
-
-#[cfg(target_arch = "wasm32")]
-fn show_status(text: &str) {
-    if let Some(status) = status_element() {
-        status.set_text_content(Some(text));
-        let _ = status.set_attribute("class", "visible");
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
 fn query() -> String {
     web_sys::window()
         .and_then(|w| w.location().search().ok())
         .unwrap_or_default()
-}
-
-/// `?speed` or `?speed=<games>` opens the speed test instead of the app.
-#[cfg(target_arch = "wasm32")]
-fn speed_games() -> Option<u64> {
-    let query = query();
-    let value = query
-        .trim_start_matches('?')
-        .split('&')
-        .find_map(|pair| pair.strip_prefix("speed"))?;
-    Some(
-        value
-            .strip_prefix('=')
-            .and_then(|n| n.parse().ok())
-            .unwrap_or(1_000),
-    )
-}
-
-/// Runs the speed checks and solver games in a Web Worker, where Phase 2 will run the solver.
-#[cfg(target_arch = "wasm32")]
-async fn run_speed(games: u64) {
-    use std::{cell::RefCell, rc::Rc};
-    let window = web_sys::window().expect("browser window");
-    let mut header = vec![
-        format!("Geschwindigkeitstest · {games} Partien"),
-        window.navigator().user_agent().unwrap_or_default(),
-    ];
-    if !window.is_secure_context() {
-        header.push(
-            "Achtung: unverschlüsselte Verbindung. iPhones rechnen dann etwa 35-mal \
-             langsamer; die Adresse muss mit https:// beginnen."
-                .into(),
-        );
-    }
-    let lines = Rc::new(RefCell::new(header));
-    let show: Rc<dyn Fn()> = Rc::new({
-        let lines = lines.clone();
-        move || show_status(&lines.borrow().join("\n"))
-    });
-    show();
-    if let Err(error) = run_worker(games, lines.clone(), show.clone()).await {
-        lines.borrow_mut().push(format!("Fehler: {error:?}"));
-    }
-    lines.borrow_mut().push("Fertig.".into());
-    show();
-}
-
-/// The worker posts `true` once it listens, then one string per line, then `null`.
-#[cfg(target_arch = "wasm32")]
-async fn run_worker(
-    games: u64,
-    lines: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
-    show: std::rc::Rc<dyn Fn()>,
-) -> Result<(), wasm_bindgen::JsValue> {
-    use wasm_bindgen::{JsCast, JsValue, closure::Closure};
-    let worker = web_sys::Worker::new("./speed-worker_loader.js")?;
-    let done = js_sys::Promise::new(&mut |resolve, reject| {
-        let (target, lines, show) = (worker.clone(), lines.clone(), show.clone());
-        let on_message =
-            Closure::<dyn Fn(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
-                let data = event.data();
-                if data.as_bool() == Some(true) {
-                    let _ = target.post_message(&JsValue::from_f64(games as f64));
-                } else if let Some(line) = data.as_string() {
-                    lines.borrow_mut().push(line);
-                    show();
-                } else {
-                    let _ = resolve.call0(&JsValue::NULL);
-                }
-            });
-        worker.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
-        on_message.forget();
-        worker.set_onerror(Some(&reject));
-    });
-    let result = wasm_bindgen_futures::JsFuture::from(done).await;
-    worker.terminate();
-    result.map(|_| ())
 }
 
 #[cfg(not(target_arch = "wasm32"))]

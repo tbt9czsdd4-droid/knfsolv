@@ -2,7 +2,7 @@
 #![cfg(target_os = "linux")]
 
 use knfsolv::{
-    coaching::{AnalysisKey, AnalysisRequest, ComputationWorker},
+    coaching::{AnalysisKey, AnalysisRequest, Computation, ComputationWorker},
     dice::Dice,
     game::{JobPurpose, JobToken},
     policy::Policy,

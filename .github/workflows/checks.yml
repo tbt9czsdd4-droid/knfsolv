@@ -1,0 +1,49 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  native:
+    name: Desktop, CLI and TUI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Clippy with the desktop interface
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Clippy without the desktop interface
+        run: cargo clippy -p knfsolv --all-targets --no-default-features -- -D warnings
+      - name: Tests with the desktop interface
+        run: cargo test --workspace --release
+      - name: Tests without the desktop interface
+        run: cargo test -p knfsolv --release --no-default-features
+
+  web:
+    name: Browser build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy for wasm32
+        run: cargo clippy -p knfsolv-web --target wasm32-unknown-unknown --bins -- -D warnings
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - name: Trunk release build
+        working-directory: web
+        run: trunk build --release

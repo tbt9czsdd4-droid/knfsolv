@@ -1,7 +1,7 @@
 //! Native desktop presentation. Domain decisions stay in the shared engine.
 use crate::{
     Error, Result,
-    coaching::{AnalysisKey, AnalysisRequest, AnalysisUpdate, ComputationWorker},
+    coaching::{AnalysisKey, AnalysisRequest, AnalysisUpdate, Computation, ComputationWorker},
     game::{
         AnalysisMode, AutomaticStep, ComputerGameConfig, ComputerPolicy, DesktopGame, DiceSource,
         GameController, JobPurpose, LocalGameConfig, PlayerControl,
@@ -69,7 +69,7 @@ pub struct Desktop {
     review_results: bool,
     report: Option<Report>,
     show_all_moves: bool,
-    worker: ComputationWorker,
+    worker: Box<dyn Computation>,
     repaint: Arc<Mutex<Option<egui::Context>>>,
     requested: Option<AnalysisKey>,
     analysis_mode: AnalysisMode,
@@ -358,11 +358,11 @@ impl Desktop {
         }
         let repaint: Arc<Mutex<Option<egui::Context>>> = Arc::new(Mutex::new(None));
         let wake = repaint.clone();
-        let worker = ComputationWorker::new(move || {
+        let worker = Box::new(ComputationWorker::new(move || {
             if let Some(ctx) = &*wake.lock().unwrap() {
                 ctx.request_repaint();
             }
-        });
+        }));
         let advisor = session
             .desktop
             .as_ref()
@@ -419,13 +419,15 @@ impl Desktop {
         }
     }
     /// Startup without a loaded file offers setup; explicit loads open immediately.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn startup(session: Session, path: Option<PathBuf>) -> Self {
-        Self::startup_with_preferences(session, path, crate::preferences::path())
+        let preferences = crate::persistence::FileStorage(crate::preferences::path());
+        Self::startup_with_preferences(session, path, preferences)
     }
     pub fn startup_with_preferences(
         session: Session,
         path: Option<PathBuf>,
-        preferences_path: PathBuf,
+        preferences: impl crate::persistence::Storage + 'static,
     ) -> Self {
         let show_home = path.is_none();
         let players = session.position.players.len();
@@ -445,7 +447,7 @@ impl Desktop {
             ..Default::default()
         };
         let (store, preferences) =
-            crate::preferences::Store::load_with_defaults(preferences_path, defaults);
+            crate::preferences::Store::load_with_defaults(preferences, defaults);
         app.install_preferences(preferences);
         app.preference_store = Some(store);
         app
@@ -2442,7 +2444,7 @@ mod tests {
         let mut app = Desktop::startup_with_preferences(
             session.clone(),
             Some(game_path.clone()),
-            prefs_path.clone(),
+            crate::persistence::FileStorage(prefs_path.clone()),
         );
         assert_eq!(app.game.session().settings.max_depth, 3);
         assert_eq!(app.game.session().settings.perspective, 1);
@@ -2487,7 +2489,7 @@ mod tests {
         let restarted = Desktop::startup_with_preferences(
             Session::load(&game_path).unwrap(),
             Some(game_path),
-            prefs_path,
+            crate::persistence::FileStorage(prefs_path),
         );
         assert_eq!(restarted.game.session().settings.max_depth, 5);
         assert!(restarted.analysis_paused);
@@ -2540,7 +2542,8 @@ mod tests {
 
     fn startup(session: Session, path: Option<PathBuf>) -> Desktop {
         let dir = tempfile::tempdir().unwrap();
-        Desktop::startup_with_preferences(session, path, dir.keep().join("preferences.json"))
+        let preferences = crate::persistence::FileStorage(dir.keep().join("preferences.json"));
+        Desktop::startup_with_preferences(session, path, preferences)
     }
     #[test]
     fn background_is_opaque_and_covers_viewport_in_both_themes() {

@@ -1,6 +1,6 @@
 # iPhone web app plan
 
-Status: Phase 0 done (device check on 2026-10-05); Phase 1 next. This replaces the earlier draft (commit `edcef33`).
+Status: Phases 0 and 1 done (2026-10-05; Pages deployment postponed); Phase 2 next. This replaces the earlier draft (commit `edcef33`).
 Sources: [the brainstorm](iphone-web-app-brainstorm.md), code inspection, and measurements taken on 2026-10-04 (section 3).
 
 ## 1. Goal
@@ -14,7 +14,8 @@ Family and friends open a link on their iPhone and add the app to the Home Scree
 | Main use on the phone | **Analyze positions** | The position editor gets the phone-first design. Local games and games against the computer stay available and reuse the same phone components, with less dedicated polish. |
 | Audience | **Me + family/friends** | No jargon, no setup, no manual saving. Installing must be explained inside the app. Nothing may require reading documentation. |
 | Language | **German** | The web app is German. The desktop app stays English (decision D6). |
-| Hosting | **GitHub Pages** | Static deployment from GitHub Actions. The free plan requires a public repository; see D8 for a way to keep the source private. |
+| Hosting | **GitHub Pages** | Static deployment from GitHub Actions. The free plan requires a public repository; see D8 for a way to keep the source private. Deployment is postponed for now (D8). |
+| App name | **Kniffel-Coach** | Home Screen name and page title; the Pages path would be `/kniffel-coach/`. |
 
 ## 2. What users get
 
@@ -48,7 +49,7 @@ The app opens exactly where it was left: same players, same sheets.
 
 ```text
 ┌──────────────────────────────────────────┐
-│ ☰  Kniffel-Rat                 ↶    ↷    │  menu · undo · redo (44-pt targets)
+│ ☰  Kniffel-Coach               ↶    ↷    │  menu · undo · redo (44-pt targets)
 ├──────────────────────────────────────────┤
 │ Anna ist dran           [1.][2.][3.] Wurf│
 │  [6] [6] [6] [2] [3]                     │  tap a die: select / keep
@@ -261,6 +262,8 @@ A GitHub Actions workflow builds with `trunk build --release --public-url /<repo
 
 The resulting URL contains the GitHub user name. That is fine with a QR code; a custom domain is optional.
 
+**Decision (2026-10-05): postponed.** Phase 1 adds the checks workflow only. Development and phone tests use `web/serve-lan.sh` until one of the options above is chosen; it has to be settled before the family uses the app.
+
 ## 5. Architecture
 
 ```text
@@ -336,6 +339,13 @@ Estimates are focused working days. Each phase ends with something testable on t
 **Done when:**
 - All existing tests pass and the desktop, CLI, and TUI behave as before.
 - The Pages URL opens on the iPhone and completes an analysis.
+
+**Status (2026-10-05): done, except the Pages deployment, which is postponed (D8).**
+- `persistence::Storage` holds one JSON document. Natively, `FileStorage` writes the file atomically as before; in the browser, `MemoryStorage` keeps it for the visit until Phase 3. The preference store uses it, which removed the `cfg!(wasm32)` exceptions from `preferences.rs`. `Session::from_json` and `persistence::to_json` read and write sessions without files.
+- `coaching::Computation` is the interface's view of analysis. `ComputationWorker` implements it unchanged, and `Desktop` holds a `Box<dyn Computation>` for the Web Worker of Phase 2.
+- `web/` shows a loading screen and a German error overlay („Etwas ist schiefgelaufen“, **Neu laden**, *Technische Details*) for panics, start failures, and failed downloads. The page title is Kniffel-Coach.
+- `.github/workflows/checks.yml` runs formatting, Clippy and tests with and without `gui`, Clippy for wasm32, and the Trunk release build.
+- The release build is 5.3 MB of Wasm, 2.1 MB gzipped, still without `wasm-opt`.
 
 ### Phase 2 — Background worker (2–3 days)
 
@@ -469,7 +479,8 @@ Estimates are focused working days. Each phase ends with something testable on t
 
 ## 10. Open questions
 
-1. **Deployment repository:** keep the source private and deploy to a separate public repository (recommended), or make this repository public after removing the rulebook PDF?
-2. **App name** on the Home Screen: „Kniffel-Rat“?
-3. **Desktop language:** keep English (recommended), or switch to German as well?
-4. **Oldest iPhone/iOS** in the family? The plan targets iOS 16.4 or newer.
+1. **Deployment repository** (postponed on 2026-10-05): keep the source private and deploy to a separate public repository (recommended), make this repository public after removing the rulebook PDF, or use GitHub Pro?
+2. **Desktop language:** keep English (recommended), or switch to German as well?
+3. **Oldest iPhone/iOS** in the family? The plan targets iOS 16.4 or newer.
+
+Answered: the app name is Kniffel-Coach (2026-10-05).

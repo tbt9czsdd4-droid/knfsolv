@@ -2,10 +2,13 @@
 use crate::{
     Error, Result,
     game::{AnalysisMode, ComputerGameConfig, LocalGameConfig},
+    persistence::Storage,
     solver::Settings,
 };
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, time::Duration};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+use std::time::Duration;
 use web_time::Instant;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,6 +90,8 @@ impl Preferences {
         Ok(())
     }
 }
+/// The desktop preference file; browsers keep preferences in their own storage.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn path() -> PathBuf {
     #[cfg(target_os = "windows")]
     let base = std::env::var_os("APPDATA").map(PathBuf::from);
@@ -103,7 +108,7 @@ pub fn path() -> PathBuf {
         .join("knfsolv/preferences.json")
 }
 pub struct Store {
-    path: PathBuf,
+    storage: Box<dyn Storage>,
     observed: Preferences,
     pending: Option<Instant>,
     persisted: Preferences,
@@ -111,23 +116,21 @@ pub struct Store {
     pub error: Option<String>,
 }
 impl Store {
-    pub fn load(path: PathBuf) -> (Self, Preferences) {
-        Self::load_with_defaults(path, Preferences::default())
+    pub fn load(storage: impl Storage + 'static) -> (Self, Preferences) {
+        Self::load_with_defaults(storage, Preferences::default())
     }
-    pub fn load_with_defaults(path: PathBuf, defaults: Preferences) -> (Self, Preferences) {
-        let loaded = match std::fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice::<Preferences>(&bytes)
-                .map_err(Error::from)
-                .and_then(|p| {
-                    p.validate()?;
-                    Ok(p)
-                }),
-            // Browsers have no preference file yet; preferences last for the visit.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound || cfg!(target_arch = "wasm32") => {
-                Ok(defaults.clone())
+    pub fn load_with_defaults(
+        storage: impl Storage + 'static,
+        defaults: Preferences,
+    ) -> (Self, Preferences) {
+        let loaded = storage.read().and_then(|stored| match stored {
+            Some(json) => {
+                let p = serde_json::from_str::<Preferences>(&json)?;
+                p.validate()?;
+                Ok(p)
             }
-            Err(e) => Err(e.into()),
-        };
+            None => Ok(defaults.clone()),
+        });
         let (preferences, error) = match loaded {
             Ok(p) => (p, None),
             Err(e) => (
@@ -139,7 +142,7 @@ impl Store {
         };
         (
             Self {
-                path,
+                storage: Box::new(storage),
                 observed: preferences.clone(),
                 persisted: preferences.clone(),
                 save_failed: false,
@@ -170,13 +173,8 @@ impl Store {
         }
         let result = (|| {
             self.observed.validate()?;
-            if cfg!(target_arch = "wasm32") {
-                return Ok(());
-            }
-            if let Some(parent) = self.path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            crate::persistence::save_json(&self.path, &self.observed)
+            self.storage
+                .write(&crate::persistence::to_json(&self.observed)?)
         })();
         self.save_failed = result.is_err();
         if result.is_ok() {
@@ -203,18 +201,19 @@ impl Drop for Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::persistence::FileStorage;
     #[test]
     fn score_wheel_preference_defaults_and_persists() {
         let old: Preferences = serde_json::from_str(r#"{"version":1}"#).unwrap();
         assert_eq!(old.score_wheel_limits, ScoreWheelLimits::StopAtEnds);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("preferences.json");
-        let (mut store, mut p) = Store::load(path.clone());
+        let (mut store, mut p) = Store::load(FileStorage(path.clone()));
         p.score_wheel_limits = ScoreWheelLimits::WrapAround;
         store.observe(&p, Instant::now());
         store.flush();
         assert_eq!(
-            Store::load(path).1.score_wheel_limits,
+            Store::load(FileStorage(path)).1.score_wheel_limits,
             ScoreWheelLimits::WrapAround
         );
     }
@@ -223,7 +222,7 @@ mod tests {
     fn debounce_roundtrip_exit_flush_and_no_unchanged_writes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config/preferences.json");
-        let (mut store, mut p) = Store::load(path.clone());
+        let (mut store, mut p) = Store::load(FileStorage(path.clone()));
         let now = Instant::now();
         store.observe(&p, now);
         store.tick(now + Duration::from_secs(1));
@@ -244,7 +243,7 @@ mod tests {
         assert!(!path.exists());
         store.tick(now + Duration::from_millis(500));
         assert!(store.error.is_none());
-        assert_eq!(Store::load(path.clone()).1, p);
+        assert_eq!(Store::load(FileStorage(path.clone())).1, p);
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
         let bytes = std::fs::read(&path).unwrap();
         store.observe(&p, now);
@@ -263,7 +262,7 @@ mod tests {
         p.engine.seed = 123;
         store.observe(&p, now);
         drop(store);
-        assert_eq!(Store::load(path.clone()).1, p);
+        assert_eq!(Store::load(FileStorage(path.clone())).1, p);
         let value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
         assert!(value["engine"].get("perspective").is_none());
@@ -281,7 +280,7 @@ mod tests {
             b"{\"engine\":{\"simulations\":0}}",
         ] {
             std::fs::write(&path, bytes).unwrap();
-            let (mut store, mut p) = Store::load(path.clone());
+            let (mut store, mut p) = Store::load(FileStorage(path.clone()));
             assert!(store.error.is_some());
             assert_eq!(p, Preferences::default());
             store.observe(&p, Instant::now());
@@ -292,7 +291,7 @@ mod tests {
             store.observe(&p, Instant::now());
             store.flush();
             assert!(store.error.is_none());
-            assert_eq!(Store::load(path.clone()).1, p);
+            assert_eq!(Store::load(FileStorage(path.clone())).1, p);
         }
     }
     #[test]
@@ -301,7 +300,7 @@ mod tests {
         let parent = dir.path().join("blocked");
         std::fs::write(&parent, "obstruction").unwrap();
         let path = parent.join("preferences.json");
-        let (mut store, mut p) = Store::load(path.clone());
+        let (mut store, mut p) = Store::load(FileStorage(path.clone()));
         p.engine.seed = 8;
         store.observe(&p, Instant::now());
         store.flush();
@@ -311,6 +310,6 @@ mod tests {
         std::fs::remove_file(&parent).unwrap();
         store.retry();
         assert!(!store.save_failed);
-        assert_eq!(Store::load(path).1, p);
+        assert_eq!(Store::load(FileStorage(path)).1, p);
     }
 }

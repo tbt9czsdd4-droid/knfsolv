@@ -5,25 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Kniffel</title>
+  <title>Kniffel-Coach</title>
   <link data-trunk rel="rust" data-bin="knfsolv-web" data-type="main" data-wasm-opt="0">
   <link data-trunk rel="rust" data-bin="speed-worker" data-type="worker" data-loader-shim data-wasm-opt="0">
   <style>
+    /* Matches egui's panel colors, so loading flows into the interface without a flash. */
+    :root { --bg: #f8f8f8; --fg: #222222; --muted: #6b6b6b; --accent: #2f6fd0; --track: #dddddd; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #1b1b1b; --fg: #dddddd; --muted: #9a9a9a; --accent: #5b95f0; --track: #3a3a3a; }
+    }
+    [hidden] { display: none !important; }
     html, body {
       margin: 0;
       height: 100%;
       overflow: hidden;
       overscroll-behavior: none;
-      background: #1b1b1b;
-      color: #dddddd;
-      font: 17px -apple-system, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      font: 17px/1.4 -apple-system, system-ui, sans-serif;
       -webkit-user-select: none;
       user-select: none;
       -webkit-touch-callout: none;
       -webkit-text-size-adjust: 100%;
-    }
-    @media (prefers-color-scheme: light) {
-      html, body { background: #f8f8f8; color: #222222; }
     }
     /* Keep the canvas clear of the notch and home indicator. */
     #frame {
@@ -34,22 +37,94 @@
       left: env(safe-area-inset-left);
     }
     #app { display: block; width: 100%; height: 100%; touch-action: none; }
-    #status {
+    .screen, #report {
       position: fixed;
       inset: 0;
+      z-index: 1;
+      box-sizing: border-box;
+      padding: calc(24px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right))
+        calc(24px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));
+      background: var(--bg);
+    }
+    .screen {
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 24px;
+      gap: 12px;
       text-align: center;
-      white-space: pre-wrap;
-      pointer-events: none;
     }
-    #status.visible { background: inherit; pointer-events: auto; -webkit-user-select: text; user-select: text; }
+    .screen h1, .screen p { margin: 0; }
+    .screen h1 { font-size: 22px; }
+    .muted { color: var(--muted); }
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 4px solid var(--track);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+    #error { -webkit-user-select: text; user-select: text; }
+    #error button {
+      min-height: 44px;
+      padding: 0 28px;
+      font: inherit;
+      font-weight: 600;
+      color: #ffffff;
+      background: var(--accent);
+      border: 0;
+      border-radius: 10px;
+    }
+    #error details { width: 100%; max-width: 560px; text-align: left; }
+    #error summary { text-align: center; color: var(--muted); padding: 8px; }
+    #error pre, #report {
+      margin: 0;
+      overflow: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font: 13px/1.45 ui-monospace, Menlo, monospace;
+      -webkit-user-select: text;
+      user-select: text;
+    }
+    #error pre { max-height: 40vh; }
   </style>
 </head>
 <body>
   <div id="frame"><canvas id="app"></canvas></div>
-  <div id="status">Kniffel lädt …</div>
+  <div id="loading" class="screen">
+    <div class="spinner"></div>
+    <p><strong>Kniffel-Coach</strong></p>
+    <p class="muted">wird geladen …</p>
+  </div>
+  <div id="error" class="screen" role="alert" hidden>
+    <h1>Etwas ist schiefgelaufen</h1>
+    <p id="error-summary"></p>
+    <button type="button" onclick="location.reload()">Neu laden</button>
+    <details>
+      <summary>Technische Details</summary>
+      <pre id="error-details"></pre>
+    </details>
+  </div>
+  <pre id="report" hidden></pre>
+  <script>
+    // Failures before the app runs (download, missing WebAssembly) never reach its own handler.
+    (function () {
+      function fail(details) {
+        var error = document.getElementById("error");
+        if (!document.getElementById("loading") || !error.hidden) return;
+        document.getElementById("error-summary").textContent =
+          "Die App konnte nicht geladen werden. Bitte die Internetverbindung prüfen.";
+        document.getElementById("error-details").textContent = String(details);
+        document.getElementById("loading").remove();
+        error.hidden = false;
+      }
+      window.addEventListener("error", function (event) { fail(event.error || event.message); });
+      window.addEventListener("unhandledrejection", function (event) { fail(event.reason); });
+      if (typeof WebAssembly !== "object") fail("Dieser Browser unterstützt kein WebAssembly.");
+    })();
+  </script>
 </body>
 </html>

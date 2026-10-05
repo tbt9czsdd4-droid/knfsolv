@@ -1,5 +1,6 @@
-//! One persistent computation thread with two replaceable slots: computer, then coaching.
-//! Browser builds have no threads yet, so polling advances short slices on the UI thread.
+//! Analysis away from the interface, behind [`Computation`]. [`ComputationWorker`] keeps one
+//! persistent thread with two replaceable slots: computer, then coaching. Browser builds have
+//! no threads yet, so there polling advances short slices on the UI thread.
 use crate::{
     Error, Result,
     game::{JobPurpose, JobToken},
@@ -35,6 +36,17 @@ pub struct AnalysisUpdate {
     pub report: std::result::Result<Report, String>,
     pub finished: bool,
     pub paused: bool,
+}
+/// Runs coaching and computer-decision analyses for the interface. Each purpose has one slot:
+/// a new request replaces the old one, and only its latest report is kept.
+pub trait Computation {
+    fn submit(&self, request: AnalysisRequest) -> Result<()>;
+    fn controls(&self, key: AnalysisKey, continuous: bool, paused: bool);
+    fn clear(&self);
+    /// At most one report per purpose is retained; slow readers never build a queue.
+    fn take_updates(&self) -> Vec<AnalysisUpdate>;
+    #[cfg(all(test, feature = "gui"))]
+    fn inject(&self, update: AnalysisUpdate);
 }
 struct Shared {
     requests: [Option<AnalysisRequest>; 2],
@@ -152,7 +164,19 @@ impl ComputationWorker {
             (self.inline.wake)();
         }
     }
-    pub fn submit(&self, request: AnalysisRequest) -> Result<()> {
+    pub fn buffered_reports(&self) -> usize {
+        self.shared
+            .0
+            .lock()
+            .unwrap()
+            .reports
+            .iter()
+            .flatten()
+            .count()
+    }
+}
+impl Computation for ComputationWorker {
+    fn submit(&self, request: AnalysisRequest) -> Result<()> {
         let i = slot(request.key.token.purpose).ok_or_else(|| {
             Error::Invalid(
                 "Only coaching and computer-decision jobs use the computation worker".into(),
@@ -190,7 +214,7 @@ impl ComputationWorker {
         condition.notify_one();
         Ok(())
     }
-    pub fn controls(&self, key: AnalysisKey, continuous: bool, paused: bool) {
+    fn controls(&self, key: AnalysisKey, continuous: bool, paused: bool) {
         let Some(i) = slot(key.token.purpose) else {
             return;
         };
@@ -209,7 +233,7 @@ impl ComputationWorker {
             condition.notify_one();
         }
     }
-    pub fn clear(&self) {
+    fn clear(&self) {
         let (mutex, condition) = &*self.shared;
         let mut shared = mutex.lock().unwrap();
         shared.cancel.cancel();
@@ -218,8 +242,7 @@ impl ComputationWorker {
         shared.generation += 1;
         condition.notify_one();
     }
-    /// At most one report per purpose is retained; slow readers never build a queue.
-    pub fn take_updates(&self) -> Vec<AnalysisUpdate> {
+    fn take_updates(&self) -> Vec<AnalysisUpdate> {
         #[cfg(target_arch = "wasm32")]
         self.pump();
         self.shared
@@ -231,18 +254,8 @@ impl ComputationWorker {
             .filter_map(Option::take)
             .collect()
     }
-    pub fn buffered_reports(&self) -> usize {
-        self.shared
-            .0
-            .lock()
-            .unwrap()
-            .reports
-            .iter()
-            .flatten()
-            .count()
-    }
     #[cfg(all(test, feature = "gui"))]
-    pub(crate) fn inject(&self, update: AnalysisUpdate) {
+    fn inject(&self, update: AnalysisUpdate) {
         let i = slot(update.key.token.purpose).unwrap();
         self.shared.0.lock().unwrap().reports[i] = Some(update);
     }
