@@ -1,6 +1,6 @@
 # iPhone web app plan
 
-Status: Phases 0–3 done (2026-10-05; Pages deployment postponed); Phase 4 next. This replaces the earlier draft (commit `edcef33`).
+Status: Phases 0–3 done (2026-10-05; Pages deployment postponed); Phase 4 in progress (step 1 of 7 done). This replaces the earlier draft (commit `edcef33`).
 Sources: [the brainstorm](iphone-web-app-brainstorm.md), code inspection, and measurements taken on 2026-10-04 (section 3).
 
 ## 1. Goal
@@ -412,6 +412,15 @@ Estimates are focused working days. Each phase ends with something testable on t
 **Done when:**
 - Headless tests at 312×675 (Schriftgröße Groß), 375×667, 390×844, and 430×932 pass. They cover: no page-wide horizontal overflow; dice, advice, and Übernehmen visible without scrolling at 390×844; picker values matching `rules::category_scores`; touch targets of at least 44 points.
 - A non-technical family member enters a real three-player position and gets advice without help.
+
+**Status (2026-10-05): in progress, in seven steps, each committed as "Phase 4.N" and reported before the next one starts.**
+1. Done: `src/gui/` split (`mod.rs`, `tests.rs`) and the translation layer `gui::i18n` (`t`, `tf`, per-thread language, a test for missing or unused German entries). The web app starts in German; the Phase 3 browser texts are translated.
+2. Score picker (desktop and phone), replacing the typing dialog.
+3. Controller features: „Übernehmen“; keeping entered dice when an edit does not change who is rolling; expected-score objective for one player; phone analysis defaults with „Länger rechnen“.
+4. Phone analyzer layout below 600 points: top bar with ☰ menu, dice panel with Wurf selector, advice card, compact sheet with sideways scrolling.
+5. Player sheet (name, Zusatz-Kniffel, order) and the „Wer ist dran?“ fallback.
+6. Welcome and „Wer spielt mit?“ screens, *Schriftgröße*, check of local and computer games.
+7. Phone-size headless tests, documentation.
 
 **First usable version:** after Phase 4 (about 2½ weeks in), the family can use the online version.
 
