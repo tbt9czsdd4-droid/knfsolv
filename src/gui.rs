@@ -17,8 +17,9 @@ use eframe::egui;
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 enum Pending {
     Local(LocalGameConfig),
@@ -2380,6 +2381,7 @@ impl eframe::App for Desktop {
         self.show(ui);
     }
 }
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run(session: Session, path: Option<PathBuf>) -> Result<()> {
     session.validate()?;
     let options = eframe::NativeOptions {

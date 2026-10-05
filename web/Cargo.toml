@@ -1,0 +1,41 @@
+[package]
+name = "knfsolv-web"
+version = "0.1.0"
+edition = "2024"
+description = "Browser entry point for the Kniffel interface"
+license = "MIT"
+publish = false
+
+# Build with Trunk (see index.html); native builds only run the speed comparison.
+[dependencies]
+knfsolv = { path = ".." }
+web-time = "1.1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+eframe = { version = "0.34.1", default-features = false, features = ["default_fonts", "glow"] }
+log = "0.4"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "DedicatedWorkerGlobalScope",
+    "Document",
+    "DomRect",
+    "Element",
+    "MouseEvent",
+    "Event",
+    "EventTarget",
+    "HtmlCanvasElement",
+    "HtmlElement",
+    "Location",
+    "MessageEvent",
+    "Navigator",
+    "Node",
+    "PointerEvent",
+    "Touch",
+    "TouchEvent",
+    "TouchList",
+    "UiEvent",
+    "Window",
+    "Worker",
+] }

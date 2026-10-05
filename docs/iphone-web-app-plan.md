@@ -1,97 +1,475 @@
-# iPhone web app implementation plan
+# iPhone web app plan
 
-## Summary and defaults
+Status: Phase 0 done (device check on 2026-10-05); Phase 1 next. This replaces the earlier draft (commit `edcef33`).
+Sources: [the brainstorm](iphone-web-app-brainstorm.md), code inspection, and measurements taken on 2026-10-04 (section 3).
 
-Build a static, installable web app that reuses Knfsolv’s Rust engine and egui interface. The phone runs all calculations locally; hosting only serves application files. Development and builds run on Linux.
+## 1. Goal
 
-The first release includes local games, computer opponents, position analysis, physical/digital dice, JSON import/export, automatic recovery, and offline use.
+Family and friends open a link on their iPhone and add the app to the Home Screen. At the table, they copy the paper score sheets into it, tap in the current dice, and see the best move with its chance of winning. The app is in German, works offline, and needs no account or setup. The phone does all the computing; GitHub Pages only serves static files. Development stays on Linux. The desktop app, CLI, and TUI keep working as they do today, apart from a few shared improvements noted in D3 and D5.
 
-Chosen defaults:
+### Decisions already made
 
-- Keep the current eframe version and WebGL renderer.
-- Use Trunk to build separate interface and solver-worker Wasm binaries.
-- Default browser coaching to **Limited: 1 second, 5,000 simulations, 10,000 nodes**. Keep Continuous available explicitly.
-- Use the bundled continuation model. External model/cache files, training, cloud synchronization, accounts, and native iOS packaging are outside this release.
-- Preserve existing desktop and CLI/TUI behavior.
+| Question | Answer | What it means for the plan |
+| --- | --- | --- |
+| Main use on the phone | **Analyze positions** | The position editor gets the phone-first design. Local games and games against the computer stay available and reuse the same phone components, with less dedicated polish. |
+| Audience | **Me + family/friends** | No jargon, no setup, no manual saving. Installing must be explained inside the app. Nothing may require reading documentation. |
+| Language | **German** | The web app is German. The desktop app stays English (decision D6). |
+| Hosting | **GitHub Pages** | Static deployment from GitHub Actions. The free plan requires a public repository; see D8 for a way to keep the source private. |
 
-Replace the exploratory content in `docs/iphone-web-app-brainstorm.md` with this implementation specification and milestone checklist.
+## 2. What users get
 
-## 1. Make the shared application browser-compatible
+### Installing (once)
 
-- Separate platform operations from shared rules, controller, solver, and presentation. Keep native CLI/TUI dependencies, filesystem access, thread creation, and desktop startup behind native target guards; conditionally derive Clap traits.
-- Add browser startup through `eframe::WebRunner`, plus an HTML loading/error screen. Report unsupported rendering, failed downloads, and initialization errors with a retry action.
-- Use `web-time` for shared timing and enable the browser randomness backend compatible with the existing dependency versions. Preserve serialized gameplay RNG state and deterministic Redo.
-- Extract validated session decoding and serialization from filesystem methods. Browser exports retain the existing session JSON format, including its `desktop` metadata.
-- Hide filesystem-path settings in browser builds. Imported native sessions use bundled browser models; explain ignored external model/cache paths before replacement.
-- Add Trunk configuration for the interface and dedicated worker, with separate feature sets so the worker excludes graphical dependencies. Trunk supports worker assets directly. [Trunk asset documentation](https://github.com/trunk-rs/trunk/blob/main/guide/src/assets/index.md)
+1. Patrick sends the link, or the QR code from the help page.
+2. In Safari, a banner explains: *„Tippe auf Teilen ⬆︎ und dann ‚Zum Home-Bildschirm‘. Dann startet die App im Vollbild und funktioniert auch offline.“*
+3. From then on, the Home Screen icon opens the app full screen, with or without internet.
 
-**Milestone:** Linux builds both Wasm targets; the browser opens the shared interface and completes a digital roll without invoking unsupported native APIs.
+### First start
 
-## 2. Run computation in a dedicated Web Worker
+The first start shows a one-screen welcome, then asks *„Wer spielt mit?“*: the number of players (1–8), listed in playing order starting with whoever began. Names are optional and default to „Ich“, „Spieler 2“, and so on. The analyzer then opens with empty sheets.
 
-Preserve the existing worker interface—submit, controls, clear, and take updates—with native and browser implementations.
+- **One player:** the advice maximizes points. Today every move shows a 100 % win chance and only the engine's expected-score tie-break picks the move. The phone UI should select the expected-score objective explicitly and show „Ø Endpunkte“ instead.
+- **Several players:** the advice maximizes the chance of winning. This is the engine's strength.
 
-- Define serializable commands for initialization, submission, pause/resume, clearing, and report acknowledgement; responses carry readiness, progress, completion, or errors.
-- Include build/protocol versions and a worker-instance identifier alongside the existing analysis key, revision, actor, and job purpose. Reject incompatible workers and stale responses.
-- Send Rust-serialized JSON strings through `postMessage`; JavaScript transports them without parsing numeric fields, preserving 64-bit seeds and identifiers.
-- Retain the existing two replaceable job slots and computer-decision priority. Keep one unacknowledged progress message per purpose, coalescing newer progress to prevent an accumulating message queue.
-- Run initialization, baseline selection, exact attempts, and sampled search inside the worker. Advance searches in approximately 20 ms slices, yielding through timer tasks between slices; publish progress at most every 200 ms, plus completion.
-- Preserve evidence across normal pause/resume. Existing exact searches remain bounded, single attempts; incomplete results keep their current honest labeling.
-- Measure initialization and individual search steps: slice limits cannot interrupt a synchronous step. While visible, a five-second failure to acknowledge a control command triggers worker termination and an explicit retry state.
-- Worker failure disables executable advice and pauses computer play while leaving manual play usable. Existing search failures may use the declared baseline inside a healthy worker; cancellation never produces a fallback move.
-- On page hiding, pause computation and block computer actions. On return, reconcile worker state before accepting results and restart computer presentation delays. After full recovery, computer play waits for explicit Resume.
+### Every later use
 
-**Milestone:** Analysis never runs on the interface thread, and Undo, replacement, pause, or backgrounding cannot apply an obsolete move.
+The app opens exactly where it was left: same players, same sheets.
 
-## 3. Add browser saving and iPhone controls
+1. **Update the sheets.** Tap a cell, then tap its value: two taps per entry (see the picker below).
+2. **Choose who is rolling and which roll this is.** The app works out whose turn it is from the number of entries, as the editor already does. Tap **1. / 2. / 3. Wurf**.
+3. **Enter the dice.** Tap five faces on the 1–6 palette. Advice appears at once and refines for a few seconds.
+4. **Optional: „Übernehmen“.**
+   - For a reroll tip, the kept dice are locked and the roll advances, so only the new dice need entering.
+   - For a scoring tip, the points are entered and the next player is up.
 
-**Storage and recovery**
+   With this, the app's sheets stay in sync with the paper block without switching to a separate “play” mode.
 
-- Use IndexedDB for separate versioned preference and recovery records. Save each valid committed game revision promptly; debounce preferences by the existing 300 ms interval.
-- Serialize writes and show “Saved on this device” only after the latest applicable transaction succeeds. Include gameplay RNG and computer configuration.
-- Keep the last valid checkpoint during partial dice entry or inconsistent position editing. Display “Draft changes not saved”; commit completed corrections through the existing controller before export.
-- On startup, offer **Resume saved game** or **New game**. Recovery restores the committed session with fresh analysis and empty undo/redo history.
-- Protect the recovery record with a revision comparison inside its write transaction. A conflicting second tab stops automatic writes and offers to load the newer checkpoint or explicitly replace it; keep the current in-memory game available for export.
-- Preserve corrupt or future-version records until explicit reset. Storage denial, quota failure, or transaction errors leave play available and show Retry and Export actions.
-- Treat browser storage as device-local recovery; explain that clearing site data removes it.
+### Phone analyzer screen (portrait, about 390 points wide)
 
-**Import and export**
+```text
+┌──────────────────────────────────────────┐
+│ ☰  Kniffel-Rat                 ↶    ↷    │  menu · undo · redo (44-pt targets)
+├──────────────────────────────────────────┤
+│ Anna ist dran           [1.][2.][3.] Wurf│
+│  [6] [6] [6] [2] [3]                     │  tap a die: select / keep
+│  (1)(2)(3)(4)(5)(6)          [⌫]         │  face palette
+├──────────────────────────────────────────┤
+│ ★ Behalte 6 6 6 · würfle 2 neu           │  recommendation card
+│   Gewinnchance 58 % · Ø 241 Punkte       │
+│   [ Übernehmen ]       Andere Züge ▾     │
+│   ✓ fertig · knappe Sache: 2. Zug fast   │
+│     gleich gut                           │
+├──────────────────────────────────────────┤
+│              Ich    Anna    Ben          │  tap a name: name, Zusatz-Kniffel
+│ 1er           3      –       2           │  tap a cell: picker
+│ 2er           –      6       –           │
+│ …                                        │
+│ Bonus      ab 63:  48/63   …             │
+│ Endsumme     112     98     120          │
+└──────────────────────────────────────────┘
+```
 
-- Replace filesystem paths with **Import JSON** and **Export JSON**, using a file input and downloadable Blob.
-- Reject files larger than 1 MiB before reading; parse and validate before changing the active session. Cancelled selection and invalid files leave the current game untouched.
-- Guard asynchronous import completion against intervening game changes, and require confirmation before replacing active progress.
-- Export prepared bytes from a direct user action. Report that a download was requested without claiming the browser saved it successfully.
+- **One vertical scroll** holds dice, advice, and sheet; the top bar stays fixed.
+- **Three or four players fit**, depending on Schriftgröße, using abbreviated row names (1er … 6er, 3er-Pasch, 4er-Pasch, Full H., Kl. Str., Gr. Str., Kniffel, Chance). With more players, the player columns scroll sideways while the row names stay put.
+- **The layout must still work at about 310 points wide.** A 390-point iPhone shows that much with Schriftgröße Groß (egui zoom factor 1.25).
 
-**Phone interface**
+### Score picker
 
-- Below 600 logical pixels, use a single-column layout: turn/dice controls, compact advice, then the selected player’s sheet. Provide a player selector and a separate totals overview.
-- Use touch targets of at least 44×44 logical pixels. Wrap toolbars and the dice palette; fit dialogs within the visible viewport.
-- In position editing, tapping a cell opens an **Open / Zero / legal score** picker with Apply and Cancel. Preserve desktop wheel editing.
-- Keep one-tap gameplay scoring and accessible Undo. Ensure dragging to scroll cannot also score or select a die.
-- Handle safe-area insets, portrait/landscape changes, browser chrome, and the software keyboard. Essential explanations must be readable without hover.
+```text
+┌──────────────────────────────────┐
+│ Anna · Dreierpasch               │
+│ [ 18 mit aktuellem Wurf ]        │  only when it applies
+│ [ Offen ]   [ Streichen (0) ]    │
+│  5   6   7   8   9  10           │
+│ 11  12  13  14  15  16           │  legal values only
+│ 17  18  19  20  21  22           │  (rules::category_scores)
+│ 23  24  25  26  27  28           │
+│ 29  30                           │
+│              [ Abbrechen ]       │
+└──────────────────────────────────┘
+```
 
-**Milestone:** A complete game and an edited position can be created, recovered, imported, and exported using touch alone.
+- One tap applies the value and closes the picker; **Undo** fixes mistakes. There is no extra Apply step.
+- The wheel isn't needed: it doesn't exist on touch screens. Typing a value isn't needed either: illegal values can't be chosen.
+- The desktop should get the same picker on click, replacing the typing dialog and keeping the mouse wheel. That leaves one code path and benefits iPad (D5).
 
-## 4. Package offline use and static hosting
+### Advice wording (German, plain)
 
-- Add a web manifest, application icons, standalone display configuration, and brief iPhone Home Screen instructions.
-- Generate a release-specific precache list containing every required HTML, JavaScript, Wasm, worker, font, and icon asset. Cache installation must succeed completely before showing “Available offline.”
-- Use a service worker scoped to the deployment directory. Resolve all assets relative to the configured base path so both root hosting and `/knfsolv/` work.
-- Keep updates waiting while an existing version is open; display “Update available—reopen to install.” Avoid forced activation or mid-game reloads. Retain caches needed by active clients.
-- Keep recovery storage separate from application caches. An interrupted update must leave the previous offline version usable. Service workers require a secure context, so production hosting uses HTTPS. [Service worker lifecycle documentation](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers)
-- Disable service-worker registration during normal development.
-- Produce a deployable `dist/` and a manually triggered GitHub Pages workflow for the existing repository. Document Linux setup, development, release builds, and hosting configuration.
+| Engine result | Phone text |
+| --- | --- |
+| Reroll, keeping dice | „Behalte 6 6 6 · würfle 2 neu“ (with small dice) |
+| Reroll everything | „Alle 5 Würfel neu würfeln“ |
+| Score | „Dreierpasch eintragen: 18 Punkte“ (+ „inkl. 50 Zusatzpunkte“) |
+| Score zero | „Kniffel streichen (0 Punkte)“ |
+| Before the roll | „Prognose vor dem Wurf: Gewinnchance 42 %“ |
+| Shared-first utility | „Gewinnchance 58 %“; win/tie split only in the details |
+| Expected final score | „Ø 241 Punkte“ |
+| Exact result | „✓ exakt berechnet“ |
+| Estimate, limit reached | „✓ fertig · 6 400 Partien simuliert“ + **Länger rechnen** |
+| Best two within 1 percentage point | „knappe Sache: Andere Züge sind fast gleich gut“ |
+| Provisional baseline | „vorläufig, rechnet noch …“ |
 
-**Milestone:** After one successful online preparation, the installed app cold-starts in airplane mode and completes a game with analysis.
+The engine's labels („Tree depth“, „validating“, intervals, models, budgets) move into a collapsed **Technische Details** section. Numbers use German formatting (`58,3 %`).
 
-## 5. Verification and release criteria
+### Other screens
 
-- Run formatting, native tests and Clippy with and without GUI support, Wasm checks for both binaries, and a release Trunk build.
-- Test worker serialization, large integer round-trips, job priority, pause/resume evidence, message coalescing, crashes, and stale responses after every invalidating action.
-- Compare native/Wasm scoring, legal moves, RNG replay, and fixed-work solver fixtures; allow appropriate floating-point tolerance for estimates.
-- Test imports, storage failures, conflicting tabs, corrupt records, incomplete drafts, reload recovery, and paused computer recovery.
-- Automate browser checks in Chromium and WebKit for narrow layouts, touch input, storage, worker failure, offline startup, subpath hosting, and interrupted/versioned updates.
-- Verify on a real iPhone in Safari and Home Screen mode: keyboard interaction, Files import/export, rotation, screen locking, app termination, airplane mode, and returning during computer analysis.
-- Require responsive controls during analysis, no stale computer moves, no silently overwritten recovery, and no app-wide horizontal scrolling at 320–430 logical pixels.
-- Run a 30-minute continuous-analysis soak and repeated position replacements; check that memory and message queues do not grow continually.
-- Record tested device/browser versions, timing measurements, and accessibility limitations in the verification documentation. Linux WebKit automation alone does not complete the iPhone acceptance gate.
+- **☰ menu:**
+  - Neue Stellung (gleiche Spieler)
+  - Spieler ändern …
+  - Spielen: gegen den Computer / mit App-Würfeln
+  - Darstellung: Hell / Dunkel / System
+  - Schriftgröße: Normal / Groß
+  - Rechenzeit: Schnell / Gründlich / Ohne Limit
+  - Stellung teilen / öffnen
+  - Hilfe & Regeln
+  - Über die App (version, „App teilen“, diagnostics)
+  - Erweitert (the existing engine settings)
+- **Play modes** (local game and computer opponent) reuse the dice panel, advice card, and sheet. In those modes, tapping an available cell scores it, as on the desktop.
+- **Inconsistent sheets** should help instead of blocking:
+  - The message reads: „Die Anzahl der Einträge passt nicht zur Reihenfolge – fehlt irgendwo ein Eintrag?“
+  - The players whose counts don't fit are highlighted.
+  - A way forward is offered: „Trotzdem analysieren – wer ist dran?“, with one button per player. Choosing one switches to the existing hypothetical-position mode.
+
+## 3. What we already know
+
+The checks below ran in a scratch copy, so the repository is unchanged.
+
+**Compilation.** The engine library compiles for `wasm32-unknown-unknown` after four small changes:
+- enable `getrandom`'s `js` feature;
+- make `clap`, `crossterm`, `ratatui`, and `tempfile` native-only, deriving `clap::ValueEnum` via `cfg_attr`;
+- gate `mod tui`;
+- gate the file-based `save_json`.
+
+With those changes, the **entire egui GUI compiles too**. The only error was the missing `eframe::run_native` on the web.
+
+**Runtime blockers.** These compile but fail when run in a browser:
+
+| Code | Problem in the browser |
+| --- | --- |
+| `coaching::ComputationWorker` spawns a `std::thread` | Fails, and `Desktop::new` would panic at startup |
+| `std::time::Instant::now()` (solver, game, preferences, GUI) | Panics |
+| Session/preferences file I/O, `preferences::path()` env vars | Not available |
+| `catch_unwind` around solver work | A panic stops the whole Wasm instance; there is nothing to catch |
+
+**Speed.** Fixed 5,000-sample coaching runs (`AnalysisSession`, 40 ms slices, bundled continuation model):
+
+| Position | Native release | Wasm (WASI build on Node 22 / V8) | Wasm relative speed |
+| --- | --- | --- | --- |
+| Opening `1 1 2 5 5`, 2 players | 2.12 s | 2.70 s | 0.79× |
+| `examples/middle.json` | 0.13 s | 0.25 s | 0.52× (short run, JIT warm-up dominates) |
+| Opening, 4 players | 3.09 s | 3.86 s | 0.80× |
+
+- Recommendations were identical across native and Wasm, so the engine stays deterministic.
+- With 8 ms slices, the worst slice took 8.16 ms. Individual solver steps are small, so cooperative scheduling works.
+- **On the iPhone** (16 Pro, iOS 27, `?speed` test, solver in a Web Worker): 1,898 games per second over HTTPS, the same as WebKit on the development PC (1,823) and native code. Speed is not a blocker.
+- **Only over HTTPS.** iOS 27 renders plain-HTTP pages from LAN addresses in a hardened mode without the JavaScript and WebAssembly compiler (loopback is exempt). Over `http://<pc>:8080` the same phone managed 51 games per second, and every check was 15–45 times slower. GitHub Pages serves HTTPS; for development, `web/serve-lan.sh` serves the build with a self-signed certificate.
+
+**Exact endgames.** A two-open-category endgame is solved exactly in about 150 ms natively (33,701 nodes). Under a 40 ms budget, it comes back `incomplete`. Today the coaching worker caps each exact attempt at one 40 ms slice, so such endgames fall back to estimates even on the desktop. On a phone, the exact attempt needs roughly 0.2–0.4 s. That is a strong argument for a background worker (D3).
+
+**Download size.** GUI plus engine is 5.4 MB raw and **1.9 MB gzipped**, measured before `wasm-opt`, so the shipped size will be smaller. The engine alone (for the worker) is about 0.66 MB raw. It is a one-time download, after which the app is cached offline.
+
+## 4. Decisions, with pros and cons
+
+### D1 — Web app (PWA), not a native iOS app or a server
+
+| Option | Pros | Cons |
+| --- | --- | --- |
+| **PWA, solver on the phone** ✅ | No Mac or App Store; one link for the family; free hosting; instant updates; offline; same Rust code | Installation is manual (Share → Zum Home-Bildschirm); iOS PWA limits (no background work, storage separate from Safari) |
+| Native iOS app | Native feel, App Store install | Needs macOS/Xcode (or a rented Mac) and $99/year to give it to family; free signing expires after 7 days; review process |
+| Server-hosted solver | Works on any device | Needs a running server, always online, upkeep; unnecessary because the phone is fast enough (section 3) |
+
+### D2 — Reuse the egui interface; don't rewrite it in HTML
+
+| Option | Pros | Cons |
+| --- | --- | --- |
+| **egui in the browser** ✅ | Reuses `gui.rs` (4,600 lines), the game controller, and 41 headless GUI tests. One UI for desktop and phone. Phone layouts can be tested natively with `cargo test`. Fastest path. | Canvas rendering: no VoiceOver, no iOS text-size setting (an in-app *Schriftgröße* compensates), iOS keyboard handling is imperfect, the look is not native iOS |
+| HTML/TypeScript UI + Wasm engine | Native scrolling, keyboard, accessibility; smaller download | Rewrite of the whole GUI and controller wiring; two UIs to maintain; roughly two to three times the effort |
+
+**Kill criterion:** Phase 0 tests egui on a real iPhone. If tapping, scrolling, or name entry turn out unreliable, only the analyzer screen gets rebuilt in HTML. The engine, worker, storage, and PWA work in this plan stays valid either way.
+
+### D3 — Run the solver in a Web Worker
+
+| Option | Pros | Cons |
+| --- | --- | --- |
+| **Dedicated Web Worker** ✅ | UI never blocks. Exact endgame attempts can use their full ~0.5 s budget. A solver panic only kills the worker, which restarts automatically. Full CPU throughput. | A second small Wasm binary, a JSON message protocol, restart handling |
+| Slices on the UI thread | Simplest; measured slices stay tight (8.16 ms worst) | Exact endgames capped to a few ms (worse answers in exactly the positions people ask about); any panic freezes the app; roughly 50–70 % throughput; scrolling competes with analysis |
+| Wasm threads (SharedArrayBuffer) | Closest to today's code | Needs special COOP/COEP headers that GitHub Pages cannot send, plus a nightly toolchain |
+| Server | — | See D1 |
+
+**Approach:**
+- Extract the scheduling logic from `coaching::run` into a platform-neutral core: two job slots, priority, publish every 250 ms. The native thread and the web worker both drive it, so desktop behavior stays as it is and is covered by the existing worker tests.
+- Phase 0 uses the UI-thread variant as a throwaway stepping stone.
+- While at it, let the worker give the exact attempt up to 500 ms instead of one slice. This fixes the endgame fallback on desktop too.
+
+### D4 — Save automatically (localStorage), no files
+
+| Option | Pros | Cons |
+| --- | --- | --- |
+| **Autosave to `localStorage`** in the existing session JSON ✅ | Nothing to learn; survives force-quit, reboot, and updates; synchronous API fits egui; data is a few KB | 5 MB limit (irrelevant); Safari storage may be cleared for sites not visited for a while; Home Screen apps are treated separately |
+| IndexedDB | Larger, transactional | Async API with more code and more failure states, for no benefit at this data size |
+| eframe's built-in persistence | Little code | Saves every 30 s in its own format, with less control over timing and errors |
+| Manual Save/Load as on desktop | Already exists | File paths make no sense on iOS; family users would lose positions |
+
+**Details:**
+- Save each committed change about 300 ms later, and immediately when the page becomes hidden. iOS kills backgrounded apps without warning.
+- Open the last position on start.
+- Partial dice entry and undo history stay in memory, as on the desktop.
+- **Stellung teilen / öffnen** uses the same JSON as desktop saves, so positions move between the PC and the phone. Export goes through the iOS share sheet, falling back to a download. Import uses the Files picker; files over 1 MiB are rejected, and the file is validated before it replaces anything.
+- Replacing a position that has entries asks once: „Aktuelle Stellung verwerfen?“
+- Two things to tell users:
+  - Safari and the Home Screen app have **separate storage**, so a position entered in Safari does not appear in the installed app.
+  - The app should be used from the Home Screen.
+
+### D5 — A dedicated phone layout below 600 points wide
+
+- Below 600 points, the app uses the layout in section 2. At 600 points and wider, today's layouts stay unchanged.
+- That covers iPad and wide desktop windows, which get the shared touch improvements:
+  - the score picker;
+  - no information that only appears on hover;
+  - 44-point targets for primary controls.
+- Squeezing the desktop layout onto a phone would keep jargon, hover help, and wheel editing, all of which fail on touch screens.
+
+### D6 — German through a translation table; the desktop stays English
+
+| Option | Pros | Cons |
+| --- | --- | --- |
+| **Small `t("English text")` table with German entries; web defaults to German, desktop to English** ✅ | English source stays readable; the 41 GUI tests that click by English label keep working; desktop unchanged; a language switch becomes almost free | Every UI string goes through `t()`; formatted strings need placeholders |
+| Translate strings in place | No lookup layer | Desktop becomes German too; most GUI tests and the README need rewriting |
+
+- `gui.rs` has roughly 250–300 distinct UI strings.
+- A test fails when a string used with `t()` has no German entry.
+- Category names follow the rulebook: Einser … Sechser, Dreierpasch, Viererpasch, Full House, Kleine/Große Straße, Kniffel, Chance; zero is „streichen“.
+- Engine messages that users can actually trigger get German UI wording. Rare internal errors show a German sentence plus the original text under *Technische Details*.
+
+### D7 — Offline and updates: simple and safe
+
+- A small hand-written service worker precaches every file of a build in a cache named after that build's version. It serves cache-first and keeps the old version until the new one is fully cached.
+- A new version is used on the next app start. If one is waiting while the app is open, a small banner offers „Neue Version – tippen zum Aktualisieren“.
+- Because of autosave, reloading loses nothing. That removes the need for the complex “wait until all tabs close” logic of the earlier draft.
+- During development the service worker is off.
+- Service workers need HTTPS; GitHub Pages provides it.
+
+### D8 — GitHub Pages deployment
+
+A GitHub Actions workflow builds with `trunk build --release --public-url /<repository>/` and deploys to Pages. The free plan serves Pages only from **public** repositories. The repository currently contains the Schmidt rulebook PDF, which is copyrighted.
+
+| Option | Notes |
+| --- | --- |
+| **Keep the source private; deploy the built `dist/` to a separate public repository** (recommended) | Only the compiled app is public. Needs one access token as an Actions secret. |
+| Make this repository public | Simplest, but first remove the PDF; it would also stay reachable in git history unless history is rewritten |
+| GitHub Pro | Pages from the private repository, about $4/month |
+
+The resulting URL contains the GitHub user name. That is fine with a QR code; a custom domain is optional.
+
+## 5. Architecture
+
+```text
+Linux PC ──git push──▶ GitHub Actions ──▶ GitHub Pages (static HTTPS files)
+                                                │ first visit, online
+                                                ▼
+iPhone · Home Screen app
+  service worker ── serves the cached app files (offline after first start)
+  main thread ──── egui UI (app.wasm) ──JSON messages──▶ Web Worker: solver (worker.wasm)
+  localStorage ─── current position + preferences
+```
+
+| Area | Change |
+| --- | --- |
+| `Cargo.toml` | Native-only `clap`/`crossterm`/`ratatui`/`tempfile`; `getrandom` `js` on Wasm; `web-time`; workspace member `web/` |
+| `solver/`, `game.rs`, `coaching.rs`, `preferences.rs`, `gui` | `web_time::Instant` (re-exports `std` on native, so the API is unchanged) |
+| `coaching.rs` | Extract the scheduler core; add a `Computation` trait. The native thread implementation keeps today's behavior. Serde derives on requests/updates/keys |
+| `persistence.rs`, `preferences.rs` | Separate parse/serialize from file access; add a storage trait (files on native, `localStorage` on web) |
+| `gui.rs` → `src/gui/` | Split the 4,600-line file: shared state, `phone.rs` layout, widgets (dice, picker), `i18n.rs`. Desktop layouts stay as they are |
+| `game.rs` | Editor commands: apply advice („Übernehmen“); keep entered dice when an edit doesn't change who is rolling (today any change of entry counts clears them) |
+| `web/` (new crate) | App entry (`eframe::WebRunner`), worker entry, browser glue (storage, share/import, visibility, install hint), `index.html`, CSS (safe areas, no zoom, `100dvh`), `sw.js`, manifest, icons, `Trunk.toml` |
+| `.github/workflows/` | Checks and Pages deployment |
+| Docs | README section, German user guide, verification notes |
+
+**Worker protocol:**
+- Messages are JSON strings serialized by Rust on both ends, so JavaScript never parses the 64-bit seeds and keys.
+- Main → worker: `Submit`, `Controls`, `Clear`. Worker → main: `Ready{version}`, `Update`.
+- The existing revision/actor/purpose/serial keys keep rejecting stale results.
+- The main thread remembers the latest requests. If the worker dies, it starts a new one and resubmits them; after three failures within a minute it offers „Neu laden“.
+- When the page is hidden, analysis and computer play pause.
+
+## 6. Phases
+
+Estimates are focused working days. Each phase ends with something testable on the iPhone, because deployment is set up early.
+
+### Phase 0 — Device check (1–2 days)
+
+**Goal:** answer “does egui feel good on an iPhone, and how fast is the solver there?” before investing further.
+
+**Tasks:**
+- Apply the minimal compile changes from section 3.
+- Add a web entry point.
+- Run analysis on the UI thread (temporary).
+- Start `web/serve-lan.sh` and open `https://<pc>:8443` on the iPhone over Wi-Fi. Plain HTTP also loads, but iOS then runs the page without its compiler (section 3).
+
+**Check:**
+- Tapping dice, palette, and cells; scrolling the sheet; typing a name; rotation; notch and home-bar areas; readability.
+- Run a fixed benchmark position and note games per second.
+
+**Done when:** there is a go/no-go for D2 and measured numbers for the default thinking time.
+
+**Status (2026-10-05): done. Device check on an iPhone 16 Pro (iOS 27); go for D2.**
+- `web/` contains the browser entry point. `?bench` opens the fixed opening `1 1 2 5 5` in the analyzer; `?speed` runs timing checks and solver games in a Web Worker without the interface.
+- On the web, `coaching::ComputationWorker` advances 8 ms slices whenever the GUI polls, using the same `step` function the native thread now loops over.
+- Saving files is unavailable in the browser, and preferences last for the visit. That changes in Phase 3.
+- **Works on the iPhone:** loading, light/dark switching, tapping dice, palette, and cells, touch scrolling (also during analysis), rotation, notch and home-bar areas, readability.
+- **Speed:** native speed over HTTPS, 35 times slower over plain HTTP (section 3). Development uses `web/serve-lan.sh`.
+- **Name entry needed two taps.** egui often focuses a text field only after the tap, too late for iOS to open the keyboard ([egui#4569](https://github.com/emilk/egui/issues/4569)). `web/src/keyboard.rs` focuses eframe's input inside `touchend` instead. Confirmed on the iPhone: one tap opens the keyboard.
+- **Start screen is cramped** at phone width (fixed desktop widths); the phone layout in Phase 4 replaces it.
+- **Once the app reopened on the home screen** after being in the background: iOS discards background pages. Autosave in Phase 3 restores the position.
+- Native tests, Clippy (with and without `gui`), and the Wasm Clippy build pass.
+
+### Phase 1 — Browser build foundation and deployment (2–3 days)
+
+**Tasks:**
+- Make the dependency and `Instant` changes properly.
+- Add the storage and computation traits, with native implementations unchanged.
+- Create the `web/` crate with a loading screen and an error overlay. A panic shows „Etwas ist schiefgelaufen – Neu laden“; the autosaved position survives.
+- Add a GitHub Actions workflow:
+  - checks: `cargo fmt`, Clippy and tests with and without `gui`, Wasm `cargo check`, `trunk build --release`;
+  - deployment to Pages (D8).
+
+**Done when:**
+- All existing tests pass and the desktop, CLI, and TUI behave as before.
+- The Pages URL opens on the iPhone and completes an analysis.
+
+### Phase 2 — Background worker (2–3 days)
+
+**Tasks:**
+- Extract the scheduler core (the existing worker tests guard native behavior).
+- Add the serde protocol and the worker binary.
+- Add the main-thread `Computation` implementation, with restart on crash and pause when hidden.
+- Give the exact attempt its full budget.
+- Delete the UI-thread stepping stone.
+
+**Done when:**
+- The sheet scrolls smoothly during analysis on the iPhone.
+- Editing or Undo during analysis never shows old advice.
+- The two-open-category endgame from section 3 reports „exakt berechnet“.
+- A debug “crash worker” button recovers by itself.
+
+### Phase 3 — Autosave, share, and open (1–2 days)
+
+**Tasks:**
+- Add the `localStorage` session and preference stores (D4); open the last position on start.
+- Hide the desktop file menu, path field, and “unsaved changes” prompts on the web.
+- Add *Stellung teilen / öffnen*.
+
+**Done when:**
+- After force-quitting and reopening, the position is back.
+- Export → Files → import round-trips on the iPhone.
+- A phone export opens in the desktop app.
+
+### Phase 4 — Phone analyzer, German from the start (5–7 days)
+
+**Tasks:**
+- Add the `t()` translation layer first. Write all new phone strings in German right away.
+- Build the phone layout from section 2: top bar, dice panel with the Wurf selector, advice card, compact sheet grid with sideways scrolling for five or more players.
+- Add the score picker, used on the desktop as well.
+- Add the player sheet: name, Zusatz-Kniffel count, order.
+- Add the „Wer ist dran?“ fallback for inconsistent sheets.
+- Keep entered dice when an edit doesn't change who is rolling.
+- Add „Übernehmen“ in the analyzer.
+- Phone defaults:
+  - Limited analysis of about 3 s / 20,000 games (tuned with the Phase 0 numbers), with **Länger rechnen** continuing the same search;
+  - one player uses the expected-score objective.
+- Add the welcome and „Wer spielt mit?“ screens.
+- Add *Schriftgröße* via egui's zoom factor.
+- Remove hover-only information from the phone screens.
+- Check that local and computer games are usable with the shared components.
+
+**Done when:**
+- Headless tests at 312×675 (Schriftgröße Groß), 375×667, 390×844, and 430×932 pass. They cover: no page-wide horizontal overflow; dice, advice, and Übernehmen visible without scrolling at 390×844; picker values matching `rules::category_scores`; touch targets of at least 44 points.
+- A non-technical family member enters a real three-player position and gets advice without help.
+
+**First usable version:** after Phase 4 (about 2½ weeks in), the family can use the online version.
+
+### Phase 5 — German everywhere else (2–3 days)
+
+**Tasks:**
+- Translate the remaining reachable screens: home, local/computer setup, results, settings, error messages.
+- Write a short German *Hilfe & Regeln* page: how to use it, the house conventions from [rules.md](rules.md) such as additional Kniffels, and the QR code.
+- Use German number formatting.
+
+**Done when:** no English is visible in normal flows (only under *Technische Details*), and the missing-translation test passes.
+
+### Phase 6 — Install and offline (1–2 days)
+
+**Tasks:**
+- Add the manifest (name, standalone display, theme colors) and the `apple-touch-icon` and status-bar meta tags.
+- Add a dice icon set and the Safari install banner.
+- Add the service worker, with a per-build precache list generated by a Trunk post-build hook, and the update banner.
+- Add „App teilen“, which opens the iOS share sheet with the URL.
+
+**Done when:**
+- After one online start, the Home Screen app cold-starts in airplane mode and analyzes a position.
+- A new deployment shows the update banner and updates without losing the position.
+
+### Phase 7 — iPhone testing, polish, documentation (2–3 days)
+
+**Tasks:**
+- Work through the device checklist (section 7).
+- Run a 30-minute continuous-analysis check for memory and heat.
+- Tune the defaults from measurements.
+- Write the README section, the German user guide, and the verification entry, recording device models, iOS versions, timings, and known limitations.
+
+**Total:** about **16–25 focused days (roughly 3–5 weeks)**. This is more than the brainstorm's 1–3 weeks because of the German translation and the redesigned analyzer. A reasonable cut, if needed, is to postpone Phase 5 for screens the family doesn't use.
+
+## 7. Testing
+
+- **Native first.** Phone layouts are ordinary egui code, so `cargo test` renders them headlessly at phone sizes with the existing test harness. This is the main safety net and runs in CI.
+- **Shared logic.** The scheduler core, worker protocol round-trips (including large 64-bit values), the editor's „Übernehmen“, and dice retention are covered by native unit tests.
+- **Browser build.** CI checks both Wasm binaries and runs a release Trunk build. Before testing on the phone, smoke-test WebKit behavior on Linux with GNOME Web (Epiphany) or Playwright's WebKit build; both use Safari's engine family.
+- **Debugging without a Mac.** Safari's Web Inspector needs macOS, so the app brings its own help:
+  - *Über die App → Diagnose* shows the version, worker status, storage status, recent errors, and a speed test (games per second on a fixed position).
+  - Panics appear on screen with a copyable report.
+- **Device checklist (iPhone, Safari and Home Screen):**
+  - install from a link;
+  - first start;
+  - enter a three-player position by touch;
+  - advice, Übernehmen, Undo;
+  - lock the screen during analysis and return;
+  - force-quit and reopen;
+  - airplane-mode cold start;
+  - update after a deployment;
+  - rotate;
+  - dark mode;
+  - Schriftgröße Groß;
+  - share and open a position via Files and AirDrop.
+
+  Test on the oldest family iPhone too.
+
+## 8. Risks
+
+| Risk | Mitigation |
+| --- | --- |
+| egui feels wrong on iOS (keyboard, scrolling) | Phase 0 go/no-go; fallback: HTML analyzer only (D2); names are optional, so the keyboard is rarely needed |
+| Phone slower or hotter than expected | Measured native speed on an iPhone 16 Pro (section 3); limited analysis by default; pause when hidden; Diagnose speed test |
+| Page served over plain HTTP runs without the compiler on iOS (35× slower) | HTTPS everywhere: GitHub Pages in production, `web/serve-lan.sh` in development; the speed test warns on insecure pages |
+| Safari clears data, or users use the Safari tab instead of the app | Install banner and help text; export as backup; request persistent storage where supported |
+| WebGL context lost after the app is backgrounded | Test in Phase 7; eframe recreates it, otherwise reload (position is autosaved) |
+| Service worker stuck on an old version | Versioned caches; „Neu laden“ in Diagnose; a self-unregistering `sw.js` can be deployed as a kill switch |
+| Desktop regressions from the refactors | Native behavior stays behind the existing 100+ tests; scheduler extraction guarded by the worker tests |
+| Missing German strings after later changes | Missing-translation test in CI |
+| Public URL and naming | The rulebook PDF must not be published (D8); avoid Schmidt logos; „Kniffel“ in the app name is fine for a private family tool |
+
+## 9. Deliberately not planned
+
+- **Native iOS app** and App Store distribution (D1).
+- **Accounts, cloud sync, online multiplayer.** These would need a server and conflict with “no setup”.
+- **Multi-tab conflict handling.** The Home Screen app runs as a single instance with its own storage; last write wins in Safari tabs.
+- **Custom models, solitaire caches, and training in the browser.** The bundled model is used; the desktop and CLI keep these features.
+- **VoiceOver support.** egui draws to a canvas; documented as a limitation.
+- **A separate landscape design.** Landscape uses the existing small-window layout.
+- **Later ideas:** share a position as a link (`#stellung=…`), a list of recent positions, an iPad-tuned layout, an English switch on the web.
+
+## 10. Open questions
+
+1. **Deployment repository:** keep the source private and deploy to a separate public repository (recommended), or make this repository public after removing the rulebook PDF?
+2. **App name** on the Home Screen: „Kniffel-Rat“?
+3. **Desktop language:** keep English (recommended), or switch to German as well?
+4. **Oldest iPhone/iOS** in the family? The plan targets iOS 16.4 or newer.

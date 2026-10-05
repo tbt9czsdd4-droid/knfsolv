@@ -9,6 +9,7 @@ pub mod preferences;
 pub mod rules;
 pub mod solver;
 pub mod state;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod tui;
 
 #[derive(Debug, thiserror::Error)]

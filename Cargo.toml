@@ -5,17 +5,27 @@ edition = "2024"
 description = "Opponent-aware Kniffel analysis and terminal score sheet"
 license = "MIT"
 
+[workspace]
+members = ["web"]
+
 [dependencies]
-clap = { version = "4.6", features = ["derive"] }
-crossterm = "0.28"
-ratatui = "0.29"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["float_roundtrip"] }
 thiserror = "2.0"
 rand = "0.8"
 rand_chacha = "0.3"
-tempfile = "3.27"
+web-time = "1.1"
 eframe = { version = "0.34.1", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "accesskit"], optional = true }
+
+# The CLI and terminal interface need a real terminal and filesystem.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+clap = { version = "4.6", features = ["derive"] }
+crossterm = "0.28"
+ratatui = "0.29"
+tempfile = "3.27"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
 
 [features]
 default = ["gui"]

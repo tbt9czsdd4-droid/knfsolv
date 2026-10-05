@@ -2,7 +2,8 @@
 use super::{Budget, Cancel, turn::TurnTable};
 use crate::{Error, Result, dice::tables, rules, state::Sheet};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::Path, time::Instant};
+use std::{collections::HashMap, path::Path};
+use web_time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Key {

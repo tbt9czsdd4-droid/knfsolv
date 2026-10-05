@@ -426,7 +426,7 @@ impl SampleSearch {
     }
     /// One game step. A completed game is counted exactly once; pairs commit only after a full round.
     pub(super) fn step(&mut self) {
-        let start = std::time::Instant::now();
+        let start = web_time::Instant::now();
         if !self.frozen
             && (self.training_n >= self.training_limit
                 || self

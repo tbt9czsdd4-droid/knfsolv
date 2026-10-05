@@ -4,7 +4,8 @@ use crate::{
     Result,
     state::{Phase, Position},
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 #[derive(Clone, Copy, Debug)]
 pub struct WorkSlice {

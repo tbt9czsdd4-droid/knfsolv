@@ -1,15 +1,18 @@
 //! One persistent computation thread with two replaceable slots: computer, then coaching.
+//! Browser builds have no threads yet, so polling advances short slices on the UI thread.
 use crate::{
     Error, Result,
     game::{JobPurpose, JobToken},
     solver::{AnalysisSession, Cancel, Report, Settings, WorkSlice},
     state::Position,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use std::thread::{self, JoinHandle};
 use std::{
     sync::{Arc, Condvar, Mutex},
-    thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AnalysisKey {
@@ -92,7 +95,15 @@ fn slot(purpose: JobPurpose) -> Option<usize> {
 }
 pub struct ComputationWorker {
     shared: Arc<(Mutex<Shared>, Condvar)>,
+    #[cfg(not(target_arch = "wasm32"))]
     thread: Option<JoinHandle<()>>,
+    #[cfg(target_arch = "wasm32")]
+    inline: Inline,
+}
+#[cfg(target_arch = "wasm32")]
+struct Inline {
+    states: std::cell::RefCell<[Option<Running>; 2]>,
+    wake: Box<dyn Fn()>,
 }
 impl ComputationWorker {
     pub fn new(wake: impl Fn() + Send + Sync + 'static) -> Self {
@@ -107,14 +118,38 @@ impl ComputationWorker {
             }),
             Condvar::new(),
         ));
-        let worker_shared = shared.clone();
-        let thread = thread::Builder::new()
-            .name("kniffel-analysis".into())
-            .spawn(move || run(worker_shared, &wake))
-            .expect("start analysis worker");
+        #[cfg(not(target_arch = "wasm32"))]
+        let thread = {
+            let worker_shared = shared.clone();
+            thread::Builder::new()
+                .name("kniffel-analysis".into())
+                .spawn(move || run(worker_shared, &wake))
+                .expect("start analysis worker")
+        };
         Self {
             shared,
+            #[cfg(not(target_arch = "wasm32"))]
             thread: Some(thread),
+            #[cfg(target_arch = "wasm32")]
+            inline: Inline {
+                states: std::cell::RefCell::new([None, None]),
+                wake: Box::new(wake),
+            },
+        }
+    }
+    /// Short slices keep the UI responsive; each frame that polls computes one of them.
+    #[cfg(target_arch = "wasm32")]
+    fn pump(&self) {
+        let slice = WorkSlice {
+            max_time: Duration::from_millis(8),
+            ..WorkSlice::default()
+        };
+        let mut states = self.inline.states.borrow_mut();
+        if matches!(
+            step(&self.shared, &mut states, slice, &self.inline.wake),
+            Step::Worked
+        ) {
+            (self.inline.wake)();
         }
     }
     pub fn submit(&self, request: AnalysisRequest) -> Result<()> {
@@ -185,6 +220,8 @@ impl ComputationWorker {
     }
     /// At most one report per purpose is retained; slow readers never build a queue.
     pub fn take_updates(&self) -> Vec<AnalysisUpdate> {
+        #[cfg(target_arch = "wasm32")]
+        self.pump();
         self.shared
             .0
             .lock()
@@ -219,6 +256,7 @@ impl Drop for ComputationWorker {
             shared.cancel.cancel();
             condition.notify_one();
         }
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -243,87 +281,109 @@ fn publish(shared: &Arc<(Mutex<Shared>, Condvar)>, i: usize, running: &Running, 
         wake();
     }
 }
+enum Step {
+    Worked,
+    /// Nothing can run until a request changes after this generation (the thread waits on it).
+    Idle(#[cfg_attr(target_arch = "wasm32", allow(dead_code))] u64),
+    Shutdown,
+}
+/// One scheduling round: sync job states with requests, then advance the chosen job one slice.
+fn step(
+    shared: &Arc<(Mutex<Shared>, Condvar)>,
+    states: &mut [Option<Running>; 2],
+    slice: WorkSlice,
+    wake: &impl Fn(),
+) -> Step {
+    let (requests, generation) = {
+        let shared = shared.0.lock().unwrap();
+        if shared.shutdown {
+            return Step::Shutdown;
+        }
+        (shared.requests.clone(), shared.generation)
+    };
+    for i in 0..2 {
+        if states[i].as_ref().map(|s| s.key) != requests[i].as_ref().map(|r| r.key) {
+            states[i] = None;
+        }
+        if let (Some(state), Some(request)) = (&mut states[i], &requests[i])
+            && (state.paused != request.paused || state.continuous != request.continuous)
+        {
+            state.paused = request.paused;
+            state.continuous = request.continuous;
+            if let Ok(session) = &mut state.session {
+                session.set_paused(request.paused);
+                session.set_continuous(request.continuous);
+            }
+            publish(shared, i, state, wake);
+        }
+    }
+    let chosen = (0..2).find(|&i| {
+        requests[i].as_ref().is_some_and(|r| !r.paused)
+            && states[i].as_ref().is_none_or(|s| !s.finished())
+    });
+    let Some(i) = chosen else {
+        shared.0.lock().unwrap().active = None;
+        return Step::Idle(generation);
+    };
+    let request = requests[i].as_ref().unwrap();
+    let cancel = {
+        let mut shared = shared.0.lock().unwrap();
+        if shared.generation != generation || shared.shutdown {
+            return Step::Worked;
+        }
+        shared.cancel = Cancel::default();
+        shared.active = Some(i);
+        shared.cancel.clone()
+    };
+    if states[i].is_none() {
+        let mut session = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            AnalysisSession::new(request.position.clone(), request.settings.clone())
+                .map_err(|e| e.to_string())
+        }))
+        .unwrap_or_else(|_| Err("Computation worker failed while preparing the search".into()));
+        if let Ok(session) = &mut session {
+            session.set_continuous(request.continuous);
+        }
+        states[i] = Some(Running {
+            key: request.key,
+            session,
+            paused: false,
+            continuous: request.continuous,
+            published: Instant::now(),
+            baseline_only: request.baseline_only,
+        });
+        publish(shared, i, states[i].as_ref().unwrap(), wake); // Baseline before any sampled work.
+    }
+    let state = states[i].as_mut().unwrap();
+    if !state.baseline_only
+        && let Ok(session) = &mut state.session
+        && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            session.advance_cancellable(slice, &cancel)
+        }))
+        .is_err()
+    {
+        state.session = Err("Computation worker failed during search".into());
+    }
+    if state.finished() || state.published.elapsed() >= Duration::from_millis(250) {
+        publish(shared, i, state, wake);
+        state.published = Instant::now();
+    }
+    Step::Worked
+}
+#[cfg(not(target_arch = "wasm32"))]
 fn run(shared: Arc<(Mutex<Shared>, Condvar)>, wake: &impl Fn()) {
     let mut states: [Option<Running>; 2] = [None, None];
     loop {
-        let (requests, generation) = {
-            let shared = shared.0.lock().unwrap();
-            if shared.shutdown {
-                break;
-            }
-            (shared.requests.clone(), shared.generation)
-        };
-        for i in 0..2 {
-            if states[i].as_ref().map(|s| s.key) != requests[i].as_ref().map(|r| r.key) {
-                states[i] = None;
-            }
-            if let (Some(state), Some(request)) = (&mut states[i], &requests[i])
-                && (state.paused != request.paused || state.continuous != request.continuous)
-            {
-                state.paused = request.paused;
-                state.continuous = request.continuous;
-                if let Ok(session) = &mut state.session {
-                    session.set_paused(request.paused);
-                    session.set_continuous(request.continuous);
+        match step(&shared, &mut states, WorkSlice::default(), wake) {
+            Step::Worked => {}
+            Step::Shutdown => break,
+            Step::Idle(generation) => {
+                let (mutex, condition) = &*shared;
+                let mut guard = mutex.lock().unwrap();
+                while !guard.shutdown && guard.generation == generation {
+                    guard = condition.wait(guard).unwrap();
                 }
-                publish(&shared, i, state, wake);
             }
-        }
-        let chosen = (0..2).find(|&i| {
-            requests[i].as_ref().is_some_and(|r| !r.paused)
-                && states[i].as_ref().is_none_or(|s| !s.finished())
-        });
-        let Some(i) = chosen else {
-            let (mutex, condition) = &*shared;
-            let mut guard = mutex.lock().unwrap();
-            guard.active = None;
-            while !guard.shutdown && guard.generation == generation {
-                guard = condition.wait(guard).unwrap();
-            }
-            continue;
-        };
-        let request = requests[i].as_ref().unwrap();
-        let cancel = {
-            let mut shared = shared.0.lock().unwrap();
-            if shared.generation != generation || shared.shutdown {
-                continue;
-            }
-            shared.cancel = Cancel::default();
-            shared.active = Some(i);
-            shared.cancel.clone()
-        };
-        if states[i].is_none() {
-            let mut session = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                AnalysisSession::new(request.position.clone(), request.settings.clone())
-                    .map_err(|e| e.to_string())
-            }))
-            .unwrap_or_else(|_| Err("Computation worker failed while preparing the search".into()));
-            if let Ok(session) = &mut session {
-                session.set_continuous(request.continuous);
-            }
-            states[i] = Some(Running {
-                key: request.key,
-                session,
-                paused: false,
-                continuous: request.continuous,
-                published: Instant::now(),
-                baseline_only: request.baseline_only,
-            });
-            publish(&shared, i, states[i].as_ref().unwrap(), wake); // Baseline before any sampled work.
-        }
-        let state = states[i].as_mut().unwrap();
-        if !state.baseline_only
-            && let Ok(session) = &mut state.session
-            && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                session.advance_cancellable(WorkSlice::default(), &cancel)
-            }))
-            .is_err()
-        {
-            state.session = Err("Computation worker failed during search".into());
-        }
-        if state.finished() || state.published.elapsed() >= Duration::from_millis(250) {
-            publish(&shared, i, state, wake);
-            state.published = Instant::now();
         }
     }
 }

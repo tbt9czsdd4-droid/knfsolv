@@ -5,10 +5,8 @@ use crate::{
     solver::Settings,
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    path::PathBuf,
-    time::{Duration, Instant},
-};
+use std::{path::PathBuf, time::Duration};
+use web_time::Instant;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -124,7 +122,10 @@ impl Store {
                     p.validate()?;
                     Ok(p)
                 }),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(defaults.clone()),
+            // Browsers have no preference file yet; preferences last for the visit.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound || cfg!(target_arch = "wasm32") => {
+                Ok(defaults.clone())
+            }
             Err(e) => Err(e.into()),
         };
         let (preferences, error) = match loaded {
@@ -169,6 +170,9 @@ impl Store {
         }
         let result = (|| {
             self.observed.validate()?;
+            if cfg!(target_arch = "wasm32") {
+                return Ok(());
+            }
             if let Some(parent) = self.path.parent() {
                 std::fs::create_dir_all(parent)?;
             }

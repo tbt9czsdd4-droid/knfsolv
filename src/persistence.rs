@@ -1,6 +1,6 @@
 use crate::{Result, solver::Settings, state::Position};
 use serde::{Deserialize, Serialize};
-use std::{io::Write, path::Path};
+use std::path::Path;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,7 +37,9 @@ impl Session {
         save_json(path, self)
     }
 }
+#[cfg(not(target_arch = "wasm32"))]
 pub fn save_json(path: &Path, value: &impl Serialize) -> Result<()> {
+    use std::io::Write;
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -48,6 +50,13 @@ pub fn save_json(path: &Path, value: &impl Serialize) -> Result<()> {
     tmp.as_file().sync_all()?;
     tmp.persist(path).map_err(|e| e.error)?;
     Ok(())
+}
+/// Browsers have no filesystem; browser storage replaces files in a later phase.
+#[cfg(target_arch = "wasm32")]
+pub fn save_json(_path: &Path, _value: &impl Serialize) -> Result<()> {
+    Err(crate::Error::Invalid(
+        "Saving files is not available in the browser yet.".into(),
+    ))
 }
 
 /// GUI saves contain position context only; explicit CLI/TUI session settings still round-trip.

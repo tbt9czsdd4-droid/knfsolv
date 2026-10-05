@@ -40,6 +40,21 @@ Desktop preferences are remembered automatically in a versioned `preferences.jso
 
 The advice header displays **Tree depth N**, **Tree depth N · validating**, **Exact depth N**, or **Full-game rollouts**; **Preparing…** appears before progress exists. Depth is the deepest explored branch, not a depth solved uniformly across all moves. It counts the analyzed player's decisions from 1 at the root, excluding dice, opponents, and baseline rollout continuation. Validation retains the trained tree depth; pause retains progress, and position/engine changes reset it. An Auto fallback shows its current method and records the incomplete exact attempt in Analysis details. The configured MCTS depth limit remains separately labeled in Engine settings.
 
+### Browser (experimental)
+
+The same interface also runs in a browser via WebAssembly, as the first step toward the [iPhone web app](docs/iphone-web-app-plan.md). It needs the Wasm target and [Trunk](https://trunkrs.dev):
+
+```sh
+rustup target add wasm32-unknown-unknown
+cd web
+trunk serve --release   # http://127.0.0.1:8080
+./serve-lan.sh          # https://<lan-ip>:8443 for a phone on the same Wi-Fi
+```
+
+Phones need the HTTPS address: iOS 27 runs plain-HTTP pages from LAN addresses without its JavaScript and WebAssembly compiler, which makes the solver about 35 times slower. `serve-lan.sh` creates a self-signed certificate in `web/.tls/`; Safari warns once per certificate, continue with *Details einblenden* → *diese Website besuchen*.
+
+`?bench` opens a fixed opening position in the analyzer. `?speed` (or `?speed=<games>`) runs a speed test without the interface: timing checks and a fixed number of solver games in a Web Worker. `cargo run --release -p knfsolv-web -- speed` runs the same test natively for comparison. Analysis in the interface currently runs in short slices on the page's main thread. Saving files is unavailable, and preferences last only for the visit.
+
 For a terminal-only build without graphical dependencies:
 
 ```sh
