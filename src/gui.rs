@@ -238,14 +238,14 @@ fn die_button(
             ui.visuals().widgets.noninteractive.bg_stroke
         });
     if correction {
-        button = button.stroke(egui::Stroke::new(2., ui.visuals().text_color()));
+        button = button.stroke(egui::Stroke::new(2.0_f32, ui.visuals().text_color()));
     }
     let response = ui.add_sized([size, size], button);
     if response.has_focus() || response.hovered() {
         ui.painter().rect_stroke(
             response.rect.shrink(2.),
             5.,
-            egui::Stroke::new(2., ui.visuals().selection.stroke.color),
+            egui::Stroke::new(2.0_f32, ui.visuals().selection.stroke.color),
             egui::StrokeKind::Inside,
         );
     }
@@ -1646,7 +1646,7 @@ impl Desktop {
         recommended: bool,
     ) -> bool {
         let stroke = if recommended {
-            egui::Stroke::new(2.0, ui.visuals().selection.stroke.color)
+            egui::Stroke::new(2.0_f32, ui.visuals().selection.stroke.color)
         } else {
             ui.visuals().widgets.noninteractive.bg_stroke
         };
