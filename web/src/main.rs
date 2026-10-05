@@ -26,6 +26,7 @@ fn main() {
     use wasm_bindgen::JsCast;
 
     let _ = eframe::WebLogger::init(log::LevelFilter::Info);
+    knfsolv::gui::i18n::set_language(knfsolv::gui::i18n::Language::German);
     let runner = eframe::WebRunner::new();
     // Chain after eframe's handler; without a Mac there is no Safari console, so show panics.
     let previous = std::panic::take_hook();
