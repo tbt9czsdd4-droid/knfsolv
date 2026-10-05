@@ -26,7 +26,21 @@ enum Pending {
     Computer(ComputerGameConfig),
     Analyze(usize),
     Load(PathBuf),
+    /// A position file the browser opened, already parsed and validated.
+    Open(Box<Session>),
     Close,
+}
+
+/// Browser integration. There the current position is saved automatically, so positions are
+/// only shared and opened as files, never saved to a path.
+pub trait Browser {
+    /// Offers the position file to the user (share sheet or download). Called while the tap
+    /// or click is being handled, which browsers require.
+    fn share(&self, json: &str) -> Result<()>;
+    /// Shows the file picker; the chosen file arrives later through `take_opened`.
+    fn open(&self);
+    /// The text of a picked file, or why it could not be read.
+    fn take_opened(&self) -> Option<std::result::Result<String, String>>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,6 +84,7 @@ pub struct Desktop {
     report: Option<Report>,
     show_all_moves: bool,
     worker: Box<dyn Computation>,
+    browser: Option<Box<dyn Browser>>,
     repaint: Arc<Mutex<Option<egui::Context>>>,
     requested: Option<AnalysisKey>,
     analysis_mode: AnalysisMode,
@@ -422,6 +437,7 @@ impl Desktop {
             report: None,
             show_all_moves: false,
             worker,
+            browser: None,
             repaint,
             requested: None,
             analysis_mode: advisor.mode,
@@ -467,6 +483,15 @@ impl Desktop {
         app.install_preferences(preferences);
         app.preference_store = Some(store);
         app
+    }
+    /// Switches to browser behavior: automatic saving, share and open instead of paths.
+    pub fn set_browser(&mut self, browser: Box<dyn Browser>) {
+        self.browser = Some(browser);
+    }
+    /// The position to keep across restarts, in the format of desktop saves; `None` before a
+    /// session starts. Partial dice entry and undo history are not part of it.
+    pub fn autosave(&self) -> Option<String> {
+        self.session_active.then(|| snapshot(self.game.session()))
     }
     fn install_preferences(&mut self, p: crate::preferences::Preferences) {
         self.local_setup = p.local.clone();
@@ -539,6 +564,17 @@ impl Desktop {
                 Some(Instant::now())
             };
         }
+    }
+    /// Whether replacing the session would lose scores entered on a sheet.
+    fn has_entries(&self) -> bool {
+        self.session_active
+            && self
+                .game
+                .session()
+                .position
+                .players
+                .iter()
+                .any(|p| p.sheet.open() < rules::NAMES.len())
     }
     fn dirty(&self) -> bool {
         self.session_active
@@ -629,8 +665,36 @@ impl Desktop {
         self.saved = snapshot(self.game.session());
         Ok(())
     }
+    /// Shares the committed position, completing a full dice entry first.
+    fn share(&mut self) -> Result<()> {
+        self.prepare_save()?;
+        let json =
+            crate::persistence::to_json(&crate::persistence::desktop_value(self.game.session()))?;
+        if let Some(browser) = &self.browser {
+            browser.share(&json)?;
+        }
+        Ok(())
+    }
+    fn poll_opened(&mut self) {
+        let Some(opened) = self.browser.as_ref().and_then(|b| b.take_opened()) else {
+            return;
+        };
+        match opened
+            .map_err(Error::Invalid)
+            .and_then(|json| Session::from_json(&json))
+        {
+            Ok(session) => self.request(Pending::Open(Box::new(session))),
+            Err(e) => self.message = format!("This file is not a saved position. {e}"),
+        }
+    }
     fn request(&mut self, pending: Pending) {
-        if self.dirty() {
+        // Browsers save automatically; they only confirm before entered scores are replaced.
+        let confirm = if self.browser.is_some() {
+            !matches!(pending, Pending::Close) && self.has_entries()
+        } else {
+            self.dirty()
+        };
+        if confirm {
             self.pending = Some(pending);
         } else {
             self.execute(pending);
@@ -674,21 +738,28 @@ impl Desktop {
             }
             Pending::Load(path) => match self.game.load(&path) {
                 Ok(()) => {
-                    self.refresh_revision();
                     self.path = path.display().to_string();
                     self.current_path = path;
-                    self.saved = snapshot(self.game.session());
-                    self.message = format!("Loaded {}", self.path);
-                    self.computer_notice.clear();
-                    self.session_active = true;
-                    self.navigate(Screen::Play);
-                    if self.preferences.is_none() && self.game.session().desktop.is_none() {
-                        self.analysis_mode = AnalysisMode::Continuous;
-                        self.analysis_paused = false;
-                    }
+                    self.opened(format!("Loaded {}", self.path));
                 }
                 Err(e) => self.message = e.to_string(),
             },
+            Pending::Open(session) => match self.game.replace_session(*session) {
+                Ok(()) => self.opened("Opened the position.".into()),
+                Err(e) => self.message = e.to_string(),
+            },
+        }
+    }
+    fn opened(&mut self, message: String) {
+        self.refresh_revision();
+        self.saved = snapshot(self.game.session());
+        self.message = message;
+        self.computer_notice.clear();
+        self.session_active = true;
+        self.navigate(Screen::Play);
+        if self.preferences.is_none() && self.game.session().desktop.is_none() {
+            self.analysis_mode = AnalysisMode::Continuous;
+            self.analysis_paused = false;
         }
     }
     fn started_session(&mut self, message: &str) {
@@ -1781,7 +1852,23 @@ impl Desktop {
                     });
                 });
         }
-        if self.pending.is_some() {
+        if self.pending.is_some() && self.browser.is_some() {
+            egui::Window::new("Replace position")
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.label("Discard the current position?");
+                    ui.horizontal(|ui| {
+                        if ui.button("Discard").clicked() {
+                            let p = self.pending.take().unwrap();
+                            self.execute(p);
+                        }
+                        if ui.button("Go back").clicked() {
+                            self.pending = None;
+                        }
+                    });
+                });
+        } else if self.pending.is_some() {
             egui::Window::new("Unsaved changes")
                 .collapsible(false)
                 .resizable(false)
@@ -1922,10 +2009,16 @@ impl Desktop {
                     self.navigate(Screen::AnalysisSetup);
                 }
                 ui.separator();
-                ui.label("Session path");
-                ui.add(egui::TextEdit::singleline(&mut self.path).desired_width(360.0));
-                if ui.button("Load session").clicked() {
-                    self.request(Pending::Load(PathBuf::from(&self.path)));
+                if let Some(browser) = &self.browser {
+                    if ui.button("Open position").clicked() {
+                        browser.open();
+                    }
+                } else {
+                    ui.label("Session path");
+                    ui.add(egui::TextEdit::singleline(&mut self.path).desired_width(360.0));
+                    if ui.button("Load session").clicked() {
+                        self.request(Pending::Load(PathBuf::from(&self.path)));
+                    }
                 }
             } else if self.screen == Screen::LocalSetup {
                 ui.heading("Local game");
@@ -2193,16 +2286,30 @@ impl Desktop {
                 }
                 ui.separator();
                 ui.menu_button("File", |ui| {
-                    ui.label("Session path");
-                    ui.add(egui::TextEdit::singleline(&mut self.path).desired_width(250.0));
-                    if ui.button("Save").clicked() {
-                        let result = self.save();
-                        self.outcome(result);
-                        ui.close();
-                    }
-                    if ui.button("Load session").clicked() {
-                        self.request(Pending::Load(PathBuf::from(&self.path)));
-                        ui.close();
+                    if self.browser.is_some() {
+                        if ui.button("Share position").clicked() {
+                            let result = self.share();
+                            self.outcome(result);
+                            ui.close();
+                        }
+                        if ui.button("Open position").clicked() {
+                            if let Some(browser) = &self.browser {
+                                browser.open();
+                            }
+                            ui.close();
+                        }
+                    } else {
+                        ui.label("Session path");
+                        ui.add(egui::TextEdit::singleline(&mut self.path).desired_width(250.0));
+                        if ui.button("Save").clicked() {
+                            let result = self.save();
+                            self.outcome(result);
+                            ui.close();
+                        }
+                        if ui.button("Load session").clicked() {
+                            self.request(Pending::Load(PathBuf::from(&self.path)));
+                            ui.close();
+                        }
                     }
                     ui.separator();
                     if ui.button("New game").clicked() {
@@ -2231,7 +2338,7 @@ impl Desktop {
                         self.game.set_fast_play(fast, Instant::now());
                     }
                 }
-                if self.dirty() {
+                if self.browser.is_none() && self.dirty() {
                     ui.small("Unsaved");
                 }
             });
@@ -2240,6 +2347,7 @@ impl Desktop {
     fn contents(&mut self, ui: &mut egui::Ui) {
         *self.repaint.lock().unwrap() = Some(ui.ctx().clone());
         self.poll();
+        self.poll_opened();
         let ctx = ui.ctx().clone();
         self.keyboard(&ctx);
         self.flush_correction(Instant::now());
@@ -2435,7 +2543,11 @@ mod tests {
         dice::Dice,
         solver::{self, Cancel},
     };
-    use std::time::Duration;
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+        time::Duration,
+    };
 
     #[test]
     fn global_preferences_override_loads_and_undo_without_dirtying_games() {
@@ -4600,5 +4712,119 @@ mod tests {
         let fallback = wait_computer_update(&mut app);
         app.computer_update(fallback, Instant::now());
         assert!(app.game.pending_computer_action().is_some());
+    }
+
+    /// Records shared files and hands out one picked file, like the web shell's browser.
+    #[derive(Clone, Default)]
+    struct FakeBrowser {
+        shared: Rc<RefCell<Vec<String>>>,
+        picker_opened: Rc<Cell<usize>>,
+        picked: Rc<RefCell<Option<std::result::Result<String, String>>>>,
+    }
+    impl Browser for FakeBrowser {
+        fn share(&self, json: &str) -> Result<()> {
+            self.shared.borrow_mut().push(json.into());
+            Ok(())
+        }
+        fn open(&self) {
+            self.picker_opened.set(self.picker_opened.get() + 1);
+        }
+        fn take_opened(&self) -> Option<std::result::Result<String, String>> {
+            self.picked.borrow_mut().take()
+        }
+    }
+    fn browser_app(session: Session) -> (Desktop, FakeBrowser, egui::Context) {
+        let mut app = startup(session, Some("position.json".into()));
+        let browser = FakeBrowser::default();
+        app.set_browser(Box::new(browser.clone()));
+        (app, browser, egui::Context::default())
+    }
+    fn open_file_menu(app: &mut Desktop, ctx: &egui::Context) -> egui::FullOutput {
+        let output = render(app, ctx, vec![]);
+        click(app, ctx, label_center(&output, "File"));
+        render(app, ctx, vec![])
+    }
+
+    #[test]
+    fn browser_shares_desktop_saves_without_paths_or_unsaved_prompts() {
+        let mut session = LocalGameConfig::default().session(7).unwrap();
+        session.position.players[0].sheet.cells[5] = Some(24);
+        session.position.active_player = 1;
+        let (mut app, browser, ctx) = browser_app(session.clone());
+        let output = open_file_menu(&mut app, &ctx);
+        let shown = texts(&output);
+        for hidden in ["Session path", "Save", "Load session", "Unsaved"] {
+            assert!(!shown.iter().any(|t| t == hidden), "{hidden} is shown");
+        }
+        click(&mut app, &ctx, label_center(&output, "Share position"));
+        let shared = browser.shared.borrow().clone();
+        assert_eq!(shared.len(), 1);
+        assert_eq!(
+            shared[0],
+            crate::persistence::to_json(&crate::persistence::desktop_value(&session)).unwrap()
+        );
+        assert_eq!(app.autosave(), Some(snapshot(&session)));
+        // A phone export opens in the desktop app.
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), &shared[0]).unwrap();
+        let mut desktop = startup(Session::new(2), None);
+        desktop.execute(Pending::Load(file.path().into()));
+        assert_eq!(desktop.screen, Screen::Play);
+        assert_eq!(desktop.game.session().position, session.position);
+        let output = open_file_menu(&mut app, &ctx);
+        click(&mut app, &ctx, label_center(&output, "Open position"));
+        assert_eq!(browser.picker_opened.get(), 1);
+    }
+
+    #[test]
+    fn browser_opens_files_and_confirms_before_replacing_entries() {
+        let mut current = Session::new(2);
+        current.position.players[0].sheet.cells[0] = Some(3);
+        current.position.active_player = 1;
+        let (mut app, browser, ctx) = browser_app(current.clone());
+        let mut opened = Session::new(3);
+        opened.position.players[2].name = "Opened".into();
+        *browser.picked.borrow_mut() = Some(Ok(crate::persistence::to_json(
+            &crate::persistence::desktop_value(&opened),
+        )
+        .unwrap()));
+        render(&mut app, &ctx, vec![]);
+        let output = render(&mut app, &ctx, vec![]);
+        assert!(texts(&output).contains(&"Discard the current position?".to_string()));
+        assert_eq!(app.game.session().position, current.position);
+        click(&mut app, &ctx, label_center(&output, "Discard"));
+        assert_eq!(app.game.session().position.players[2].name, "Opened");
+        assert_eq!(app.screen, Screen::Play);
+        // Without entries, opening replaces the position directly.
+        *browser.picked.borrow_mut() = Some(Ok(crate::persistence::to_json(
+            &crate::persistence::desktop_value(&Session::new(2)),
+        )
+        .unwrap()));
+        render(&mut app, &ctx, vec![]);
+        assert_eq!(app.game.session().position.players.len(), 2);
+        assert!(app.pending.is_none());
+    }
+
+    #[test]
+    fn browser_rejects_unreadable_and_invalid_files_without_changes() {
+        let mut current = Session::new(2);
+        current.position.players[1].name = "Kept".into();
+        let (mut app, browser, ctx) = browser_app(current.clone());
+        let mut invalid = Session::new(2);
+        invalid.settings.perspective = 7;
+        for picked in [
+            Err("The file is larger than 1 MiB.".to_string()),
+            Ok("not json".to_string()),
+            Ok(serde_json::to_string(&invalid).unwrap()),
+        ] {
+            *browser.picked.borrow_mut() = Some(picked);
+            render(&mut app, &ctx, vec![]);
+            assert!(
+                app.message
+                    .starts_with("This file is not a saved position.")
+            );
+            assert!(app.pending.is_none());
+            assert_eq!(app.game.session().position, current.position);
+        }
     }
 }
