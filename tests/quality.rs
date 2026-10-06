@@ -342,6 +342,9 @@ fn desktop_difficulty_ordering() {
     }
 }
 
+/// One game's (score, shared-first credit) per advice mode.
+type ModeOutcomes = [(f64, f64); 3];
+
 /// Which move a hero takes from one coaching report.
 #[derive(Clone, Copy, Debug)]
 enum AdviceMode {
@@ -480,7 +483,7 @@ fn compare_advice_modes_in_full_games() {
         AdviceMode::HighestShown,
     ];
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let results = std::sync::Mutex::new(Vec::new());
+    let results = std::sync::Mutex::new(Vec::<ModeOutcomes>::new());
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     std::thread::scope(|scope| {
         for _ in 0..threads {
@@ -499,8 +502,8 @@ fn compare_advice_modes_in_full_games() {
     });
     let results = results.into_inner().unwrap();
     let n = results.len() as f64;
-    let mean = |f: &dyn Fn(&[(f64, f64); 3]) -> f64| results.iter().map(f).sum::<f64>() / n;
-    let paired = |f: &dyn Fn(&[(f64, f64); 3]) -> f64| {
+    let mean = |f: &dyn Fn(&ModeOutcomes) -> f64| results.iter().map(f).sum::<f64>() / n;
+    let paired = |f: &dyn Fn(&ModeOutcomes) -> f64| {
         let m = mean(f);
         let var = results.iter().map(|r| (f(r) - m).powi(2)).sum::<f64>() / (n - 1.0);
         (m, 1.96 * (var / n).sqrt())
