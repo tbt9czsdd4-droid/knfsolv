@@ -463,10 +463,19 @@ impl Desktop {
             return;
         }
         let Some(best) = report.best_action else {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(t("Computing …"));
-            });
+            if self.running.is_some() && !self.analysis_done && !self.analysis_paused {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(t("Computing …"));
+                });
+            } else {
+                // A finished analysis without a move must say so instead of spinning forever.
+                ui.label(t("No suggestion for this position."));
+                if report.forecast.is_some() {
+                    self.phone_metrics(ui, report.forecast);
+                }
+            }
+            self.technical_details(ui, &report);
             return;
         };
         let estimate = |action| report.alternatives.iter().find(|a| a.action == action);

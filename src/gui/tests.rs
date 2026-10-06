@@ -2710,3 +2710,55 @@ fn new_position_keeps_the_players() {
     assert!(position.players.iter().all(|p| p.sheet.open() == 13));
     assert!(app.game.position_editor());
 }
+
+#[test]
+fn applied_score_advice_hands_the_analysis_to_the_next_player() {
+    let ctx = egui::Context::default();
+    let (mut app, recorder) = recorded_editor(2);
+    enter_roll(&mut app, [6, 6, 6, 6, 6]);
+    app.apply(Action::Write { category: 11 }).unwrap();
+    assert_eq!(app.game.session().position.active_player, 1);
+    enter_roll(&mut app, [1, 2, 3, 4, 5]);
+    render_size(&mut app, &ctx, vec![], PHONE);
+    let request = recorder.requests.borrow().last().unwrap().clone();
+    assert_eq!(request.position.active_player, 1);
+    assert_eq!(
+        request.settings.perspective, 1,
+        "analysis is for the player to move"
+    );
+    let settings = Settings {
+        method: Method::Rollout,
+        simulations: 100,
+        time_ms: 0,
+        ..request.settings.clone()
+    };
+    let report = solver::analyze(&request.position, &settings, Cancel::default()).unwrap();
+    assert!(report.best_action.is_some());
+}
+
+#[test]
+fn phone_card_explains_a_finished_analysis_without_a_move() {
+    let ctx = egui::Context::default();
+    let (mut app, recorder) = recorded_editor(2);
+    enter_roll(&mut app, [1, 2, 3, 4, 5]);
+    render_size(&mut app, &ctx, vec![], PHONE);
+    let request = recorder.requests.borrow().last().unwrap().clone();
+    let settings = Settings {
+        method: Method::Rollout,
+        simulations: 40,
+        time_ms: 0,
+        ..request.settings.clone()
+    };
+    let mut report = solver::analyze(&request.position, &settings, Cancel::default()).unwrap();
+    report.best_action = None;
+    recorder.inject(AnalysisUpdate {
+        key: request.key,
+        report: Ok(report),
+        finished: true,
+        paused: false,
+    });
+    render_size(&mut app, &ctx, vec![], PHONE);
+    let shown = texts(&render_size(&mut app, &ctx, vec![], PHONE));
+    assert!(shown.contains(&"No suggestion for this position.".to_string()));
+    assert!(!shown.contains(&"Computing …".to_string()));
+}

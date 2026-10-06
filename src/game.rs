@@ -1031,6 +1031,10 @@ impl GameController {
         }
         let mut next = self.session.clone();
         next.position.apply(action)?;
+        if self.position_editor() {
+            // The analyzer follows the player to move, as when it infers turns from edits.
+            next.settings.perspective = next.position.active_player;
+        }
         let actor = self.session.position.active_player;
         let mut events = vec![GameEvent {
             actor,

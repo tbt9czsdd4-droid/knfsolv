@@ -167,6 +167,10 @@ const GERMAN: &[(&str, &str)] = &[
     ("Play this move", "Diesen Zug ausführen"),
     ("Other moves", "Andere Züge"),
     ("Computing …", "Rechnet …"),
+    (
+        "No suggestion for this position.",
+        "Kein Vorschlag für diese Stellung.",
+    ),
     ("Chance of winning {percent}", "Gewinnchance {percent}"),
     ("Ø {points} points", "Ø {points} Punkte"),
     ("Keep", "Behalte"),
