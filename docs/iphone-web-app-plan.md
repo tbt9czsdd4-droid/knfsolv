@@ -1,6 +1,6 @@
 # iPhone web app plan
 
-Status: Phases 0–3 done (2026-10-05; Pages deployment postponed); Phase 4 in progress (step 4 of 7 done). This replaces the earlier draft (commit `edcef33`).
+Status: Phases 0–3 done (2026-10-05; Pages deployment postponed); Phase 4 in progress (step 5 of 7 done). This replaces the earlier draft (commit `edcef33`).
 Sources: [the brainstorm](iphone-web-app-brainstorm.md), code inspection, and measurements taken on 2026-10-04 (section 3).
 
 ## 1. Goal
@@ -418,7 +418,7 @@ Estimates are focused working days. Each phase ends with something testable on t
 2. Done: score picker (`src/gui/picker.rs`) on desktop and phone, replacing the typing dialog. It offers exactly `rules::category_scores` (nonzero values in a 44-point grid of six columns that fits 310 points), *Offen*, *Streichen (0)*, and the current roll's points for the rolling player; one tap applies, Undo reverts, the mouse wheel stays. `serve-lan.sh` now also rebuilds on changes to the main crate.
 3. Done: controller features. `GameController::apply_advice` is „Übernehmen“ in the position editor (a reroll locks the kept dice, a score moves to the next player; one Undo step). Entered dice stay through edits while the same player rolls. One player gets the expected-score objective. The web app starts with `Preferences::phone()` (limited analysis, 3 s / 20,000 games), and „Länger rechnen“ continues a finished limited search for the current position only.
 4. Done: phone layout (`src/gui/phone.rs`) for the play screen below 600 points, in German. A fixed top bar (☰ menu, ↺ ↻) and one vertical scroll: dice with „1./2./3. Wurf“, ★ for advised dice and a 44-point palette; the advice card („Behalte ⚄⚄ · würfle 3 neu“, „Gewinnchance 49 % · Ø 238 Punkte“, *Übernehmen*, *Andere Züge*, status such as „✔ fertig · 5 314 Partien simuliert“ with *Länger rechnen*, „Knappe Sache …“, *Technische Details*); the compact sheet with short row names, bonus progress, and player columns that scroll sideways. The menu offers *Neue Stellung (gleiche Spieler)*, *Neues Spiel …*, *Darstellung*, *Rechenzeit* (Schnell 3 s, Gründlich 15 s, Ohne Limit), sharing, and *Erweitert …*. Checked at 390×844 and 312×675; dice, advice, and *Übernehmen* are visible without scrolling at 390×844.
-5. Player sheet (name, Zusatz-Kniffel, order) and the „Wer ist dran?“ fallback.
+5. Done: player sheet and „Wer ist dran?“ (`src/gui/players.rs`). In the position editor, tapping a name opens the player sheet: name (selected until changed, so typing replaces "Player 2"), Zusatz-Kniffel −/+ with a check that refuses impossible counts, and the place in the turn order (*Früher* / *Später*); *Fertig* applies all of it as one Undo step. When the entry counts do not fit the turn order, the advice area says „Die Anzahl der Einträge passt nicht zur Reihenfolge – fehlt irgendwo ein Eintrag?“, the likely culprits are marked in the sheet, and „Trotzdem analysieren – wer ist dran?“ offers one button per player, which switches to the hypothetical mode; „Annahme: … ist dran“ then offers *Automatisch bestimmen*.
 6. Welcome and „Wer spielt mit?“ screens, *Schriftgröße*, check of local and computer games.
 7. Phone-size headless tests, documentation.
 

@@ -2762,3 +2762,77 @@ fn phone_card_explains_a_finished_analysis_without_a_move() {
     assert!(shown.contains(&"No suggestion for this position.".to_string()));
     assert!(!shown.contains(&"Computing …".to_string()));
 }
+
+#[test]
+fn phone_player_sheet_renames_counts_extra_kniffels_and_reorders() {
+    let ctx = egui::Context::default();
+    let (mut app, _recorder) = recorded_editor(3);
+    render_size(&mut app, &ctx, vec![], PHONE);
+    let name = phone_rect(&ctx, ("phone_name", 1_usize));
+    click_size(&mut app, &ctx, name.center(), PHONE);
+    assert_eq!(app.player_sheet.as_ref().unwrap().player, 1);
+    let undo = app.game.undo_len();
+    app.player_sheet.as_mut().unwrap().name = "  Anna ".into();
+    // Without a Kniffel of 50, extra Kniffels are refused and Done stays disabled.
+    app.player_sheet.as_mut().unwrap().extra_kniffels = 1;
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    assert!(
+        texts(&output).contains(
+            &"Extra Kniffels need 50 points in Kniffel and enough filled rows.".to_string()
+        )
+    );
+    click_size(&mut app, &ctx, label_center(&output, "Done"), PHONE);
+    assert!(app.player_sheet.is_some());
+    assert_eq!(app.game.session().position.players[1].name, "Player 2");
+    app.player_sheet.as_mut().unwrap().extra_kniffels = 0;
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    click_size(&mut app, &ctx, label_center(&output, "Later"), PHONE);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    assert!(texts(&output).contains(&"Place 3 of 3".to_string()));
+    click_size(&mut app, &ctx, label_center(&output, "Done"), PHONE);
+    assert!(app.player_sheet.is_none());
+    let position = &app.game.session().position;
+    assert_eq!(position.players[1].name, "Anna");
+    assert_eq!(position.turn_order, vec![0, 2, 1]);
+    assert_eq!(app.game.undo_len(), undo + 1);
+    app.undo(false);
+    assert_eq!(app.game.session().position.players[1].name, "Player 2");
+    assert_eq!(app.game.session().position.turn_order, vec![0, 1, 2]);
+}
+
+#[test]
+fn phone_asks_who_is_up_when_sheets_do_not_fit() {
+    let ctx = egui::Context::default();
+    let (mut app, recorder) = recorded_editor(3);
+    let mut next = app.game.session().clone();
+    next.position.players[0].sheet.cells[0] = Some(1);
+    next.position.players[0].sheet.cells[1] = Some(2);
+    next.position.players[2].sheet.cells[0] = Some(3);
+    app.commit(next);
+    assert!(app.game.session().position.infer_next_player().is_err());
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    let shown = texts(&output);
+    assert!(
+        shown.contains(
+            &"The number of entries does not fit the turn order – is an entry missing somewhere?"
+                .to_string()
+        )
+    );
+    assert_eq!(players::misfits(&app.game.session().position), [1]);
+    click_size(&mut app, &ctx, label_center(&output, "Player 3"), PHONE);
+    let position = &app.game.session().position;
+    assert!(position.hypothetical);
+    assert_eq!(position.active_player, 2);
+    enter_roll(&mut app, [1, 2, 3, 4, 5]);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    assert!(texts(&output).contains(&"Assumed: Player 3 is up".to_string()));
+    let request = recorder.requests.borrow().last().unwrap().clone();
+    assert_eq!(request.settings.perspective, 2);
+    click_size(
+        &mut app,
+        &ctx,
+        label_center(&output, "Determine automatically"),
+        PHONE,
+    );
+    assert!(!app.game.session().position.hypothetical);
+}

@@ -25,6 +25,7 @@ use web_time::Instant;
 pub mod i18n;
 mod phone;
 mod picker;
+mod players;
 
 enum Pending {
     Local(LocalGameConfig),
@@ -69,6 +70,8 @@ pub struct Desktop {
     message: String,
     /// The sheet cell (player, category) whose score picker is open.
     edit: Option<(usize, usize)>,
+    /// The open player sheet in the position editor, with its unapplied changes.
+    player_sheet: Option<players::PlayerDraft>,
     score_wheel: ScoreWheel,
     score_wheel_limits: ScoreWheelLimits,
     show_settings: bool,
@@ -421,6 +424,7 @@ impl Desktop {
             current_path,
             message: String::new(),
             edit: None,
+            player_sheet: None,
             score_wheel: ScoreWheel::default(),
             score_wheel_limits: ScoreWheelLimits::default(),
             show_settings: false,
@@ -565,6 +569,7 @@ impl Desktop {
         self.screen = screen;
         self.show_settings = false;
         self.edit = None;
+        self.player_sheet = None;
         if let Some(key) = self.requested {
             let paused = self.analysis_paused || screen != Screen::Play;
             self.worker
@@ -612,6 +617,7 @@ impl Desktop {
             self.running = None;
             self.report = None;
             self.edit = None;
+            self.player_sheet = None;
             self.review_results = false;
             if let Some(p) = &self.preferences {
                 self.game.set_global_advice(&p.engine);
@@ -1872,6 +1878,7 @@ impl Desktop {
 
     fn dialogs(&mut self, ctx: &egui::Context) {
         self.picker_ui(ctx);
+        self.player_sheet_ui(ctx);
         if self.pending.is_some() && self.browser.is_some() {
             egui::Window::new(t("Replace position"))
                 .collapsible(false)
@@ -2383,7 +2390,10 @@ impl Desktop {
         if self.allow_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        let modal = self.pending.is_some() || self.edit.is_some() || self.show_settings;
+        let modal = self.pending.is_some()
+            || self.edit.is_some()
+            || self.player_sheet.is_some()
+            || self.show_settings;
         ui.add_enabled_ui(!modal, |ui| {
             if self.screen != Screen::Play {
                 self.setup_ui(ui);

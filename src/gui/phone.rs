@@ -213,6 +213,9 @@ impl Desktop {
         };
         // The headline, and whether it reports a problem.
         let headline = match roller {
+            Ok(Some(player)) if editor && position.hypothetical => {
+                (position.players[player].name.clone(), false)
+            }
             Ok(Some(player)) => (
                 tf("{name} is up", &[("name", &position.players[player].name)]),
                 false,
@@ -232,6 +235,18 @@ impl Desktop {
             }
             self.roll_selector(ui, phase, editor);
         });
+        if editor && self.game.session().position.hypothetical {
+            let name = &self.game.session().position.players
+                [self.game.session().position.active_player]
+                .name;
+            let note = tf("Assumed: {name} is up", &[("name", name)]);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(note);
+                if big_button(ui, t("Determine automatically"), true) {
+                    self.infer_roller();
+                }
+            });
+        }
         let physical = self.game.physical_entry_allowed();
         let suggested = self.suggested_keeps();
         let spacing = 6.0;
@@ -430,10 +445,9 @@ impl Desktop {
         if !self.analysis_eligible() {
             if self.game.position_editor()
                 && !self.game.session().position.hypothetical
-                && let Err(error) = self.game.session().position.infer_next_player()
+                && self.game.session().position.infer_next_player().is_err()
             {
-                ui.label(t("Analysis waits until the sheets fit together."));
-                ui.small(error.to_string());
+                self.who_is_up_ui(ui);
             } else if self.game.session().position.phase == Phase::Finished {
                 ui.label(t("Game finished"));
             } else {
@@ -635,7 +649,16 @@ impl Desktop {
     /// Short row names, players in columns. With more players than fit, the player columns
     /// scroll sideways while the row names stay.
     fn phone_sheet(&mut self, ui: &mut egui::Ui) {
-        let players = self.game.session().position.players.len();
+        let position = &self.game.session().position;
+        let players = position.players.len();
+        let misfits = if self.game.position_editor()
+            && !position.hypothetical
+            && position.infer_next_player().is_err()
+        {
+            super::players::misfits(position)
+        } else {
+            vec![]
+        };
         let row = |ui: &mut egui::Ui, text: &str, strong: bool| {
             ui.allocate_ui_with_layout(
                 egui::vec2(LABEL_WIDTH, TARGET),
@@ -670,7 +693,7 @@ impl Desktop {
                         for player in 0..players {
                             ui.vertical(|ui| {
                                 ui.set_width(COLUMN_WIDTH);
-                                self.phone_column(ui, player);
+                                self.phone_column(ui, player, misfits.contains(&player));
                             });
                         }
                     });
@@ -678,7 +701,7 @@ impl Desktop {
         });
     }
 
-    fn phone_column(&mut self, ui: &mut egui::Ui, player: usize) {
+    fn phone_column(&mut self, ui: &mut egui::Ui, player: usize, misfit: bool) {
         let position = self.game.session().position.clone();
         let sheet = position.players[player].sheet;
         let rolling = player == position.active_player && position.phase != Phase::Finished;
@@ -689,15 +712,31 @@ impl Desktop {
                 |ui| add(ui),
             );
         };
+        let mut open_sheet = false;
         cell(ui, &mut |ui| {
             let name = egui::RichText::new(&position.players[player].name).strong();
-            let name = if rolling {
+            let name = if misfit {
+                name.color(ui.visuals().error_fg_color)
+            } else if rolling {
                 name.background_color(ui.visuals().selection.bg_fill)
             } else {
                 name
             };
-            ui.add(egui::Label::new(name).truncate());
+            // In the position editor, a name opens the player sheet.
+            if self.game.position_editor() {
+                let response = ui.add(egui::Button::new(name).frame(false).truncate());
+                #[cfg(test)]
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(egui::Id::new(("phone_name", player)), response.rect)
+                });
+                open_sheet = response.clicked();
+            } else {
+                ui.add(egui::Label::new(name).truncate());
+            }
         });
+        if open_sheet {
+            self.open_player_sheet(player);
+        }
         let ready = self.game.human_can_play();
         let mut action = None;
         for category in 0..13 {

@@ -208,10 +208,6 @@ const GERMAN: &[(&str, &str)] = &[
     ),
     ("Win {win} · tie {tie}", "Sieg {win} · Gleichstand {tie}"),
     ("The computer is playing …", "Der Computer spielt …"),
-    (
-        "Analysis waits until the sheets fit together.",
-        "Die Analyse wartet, bis die Blätter zusammenpassen.",
-    ),
     // Phone: dice.
     ("{name} is up", "{name} ist dran"),
     ("Game finished", "Spiel beendet"),
@@ -245,6 +241,30 @@ const GERMAN: &[(&str, &str)] = &[
     ("No limit", "Ohne Limit"),
     ("Save", "Speichern"),
     ("Advanced …", "Erweitert …"),
+    // Players.
+    ("Player", "Spieler"),
+    ("Name", "Name"),
+    ("Extra Kniffels", "Zusatz-Kniffel"),
+    ("50 points each", "je 50 Punkte"),
+    (
+        "Extra Kniffels need 50 points in Kniffel and enough filled rows.",
+        "Zusatz-Kniffel brauchen 50 Punkte beim Kniffel und genug ausgefüllte Zeilen.",
+    ),
+    ("Turn order", "Reihenfolge"),
+    ("Earlier", "Früher"),
+    ("Later", "Später"),
+    ("Place {place} of {count}", "Platz {place} von {count}"),
+    ("Done", "Fertig"),
+    (
+        "The number of entries does not fit the turn order – is an entry missing somewhere?",
+        "Die Anzahl der Einträge passt nicht zur Reihenfolge – fehlt irgendwo ein Eintrag?",
+    ),
+    (
+        "Analyze anyway – who is up?",
+        "Trotzdem analysieren – wer ist dran?",
+    ),
+    ("Assumed: {name} is up", "Annahme: {name} ist dran"),
+    ("Determine automatically", "Automatisch bestimmen"),
 ];
 
 #[cfg(test)]
