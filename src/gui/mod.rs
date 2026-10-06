@@ -23,12 +23,15 @@ use std::{
 use web_time::Instant;
 
 pub mod i18n;
+mod phone;
 mod picker;
 
 enum Pending {
     Local(LocalGameConfig),
     Computer(ComputerGameConfig),
     Analyze(usize),
+    /// A new position with the current players' names and order, and empty sheets.
+    Fresh,
     Load(PathBuf),
     /// A position file the browser opened, already parsed and validated.
     Open(Box<Session>),
@@ -741,6 +744,22 @@ impl Desktop {
                 }
                 self.refresh_revision();
                 self.started_session("New computer game. Human rolls wait for your input; computer dice are generated automatically.");
+            }
+            Pending::Fresh => {
+                let current = &self.game.session().position;
+                let mut session = Session::new(current.players.len());
+                for (player, old) in session.position.players.iter_mut().zip(&current.players) {
+                    player.name = old.name.clone();
+                }
+                session.position.turn_order = current.turn_order.clone();
+                session.position.active_player = current.turn_order[0];
+                session.settings.perspective = current.turn_order[0];
+                if let Err(e) = self.game.replace_session(session) {
+                    self.message = e.to_string();
+                    return;
+                }
+                self.refresh_revision();
+                self.started_session("");
             }
             Pending::Analyze(n) => {
                 if let Err(e) = self.game.replace_session(Session::new(n)) {
@@ -2368,6 +2387,10 @@ impl Desktop {
         ui.add_enabled_ui(!modal, |ui| {
             if self.screen != Screen::Play {
                 self.setup_ui(ui);
+                return;
+            }
+            if ui.available_width() < phone::PHONE_WIDTH {
+                self.phone_ui(ui);
                 return;
             }
             self.toolbar_ui(ui);

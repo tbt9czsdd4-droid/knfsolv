@@ -64,6 +64,68 @@ pub fn category_name(category: usize) -> &'static str {
     }
 }
 
+/// A short category name for narrow score sheets.
+pub fn category_short(category: usize) -> &'static str {
+    const ENGLISH: [&str; 13] = [
+        "1s", "2s", "3s", "4s", "5s", "6s", "3 kind", "4 kind", "Full H.", "Sm. str.", "Lg. str.",
+        "Kniffel", "Chance",
+    ];
+    const GERMAN_SHORT: [&str; 13] = [
+        "1er",
+        "2er",
+        "3er",
+        "4er",
+        "5er",
+        "6er",
+        "3er-Pasch",
+        "4er-Pasch",
+        "Full H.",
+        "Kl. Str.",
+        "Gr. Str.",
+        "Kniffel",
+        "Chance",
+    ];
+    match language() {
+        Language::English => ENGLISH[category],
+        Language::German => GERMAN_SHORT[category],
+    }
+}
+
+/// `value` with `decimals` places: a decimal comma in German.
+pub fn decimal(value: f64, decimals: usize) -> String {
+    let text = format!("{value:.decimals$}");
+    match language() {
+        Language::English => text,
+        Language::German => text.replace('.', ","),
+    }
+}
+
+/// A fraction as a percentage: `0.583` is "58,3 %" in German and "58.3%" in English.
+pub fn percent(fraction: f64, decimals: usize) -> String {
+    let number = decimal(fraction * 100.0, decimals);
+    match language() {
+        Language::English => format!("{number}%"),
+        Language::German => format!("{number}\u{a0}%"),
+    }
+}
+
+/// Thousands grouped: 6400 is "6 400" in German and "6,400" in English.
+pub fn count(n: u64) -> String {
+    let separator = match language() {
+        Language::English => ",",
+        Language::German => "\u{a0}",
+    };
+    let digits = n.to_string();
+    let mut grouped = String::new();
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            grouped.push_str(separator);
+        }
+        grouped.push(digit);
+    }
+    grouped
+}
+
 fn german(english: &str) -> Option<&'static str> {
     static TABLE: OnceLock<HashMap<&str, &str>> = OnceLock::new();
     TABLE
@@ -101,6 +163,84 @@ const GERMAN: &[(&str, &str)] = &[
     ("Apply suggestion", "Übernehmen"),
     ("Apply this move", "Diesen Zug übernehmen"),
     ("Compute longer", "Länger rechnen"),
+    ("Play suggestion", "Zug ausführen"),
+    ("Play this move", "Diesen Zug ausführen"),
+    ("Other moves", "Andere Züge"),
+    ("Computing …", "Rechnet …"),
+    ("Chance of winning {percent}", "Gewinnchance {percent}"),
+    ("Ø {points} points", "Ø {points} Punkte"),
+    ("Keep", "Behalte"),
+    ("· reroll {count}", "· würfle {count} neu"),
+    ("Reroll all five dice", "Alle 5 Würfel neu würfeln"),
+    (
+        "Score {category}: {points} points",
+        "{category} eintragen: {points} Punkte",
+    ),
+    (
+        "Cross out {category} (0 points)",
+        "{category} streichen (0 Punkte)",
+    ),
+    ("incl. 50 bonus points", "inkl. 50 Zusatzpunkte"),
+    ("Forecast before the roll", "Prognose vor dem Wurf"),
+    ("✔ calculated exactly", "✔ exakt berechnet"),
+    (
+        "✔ done · {count} games simulated",
+        "✔ fertig · {count} Partien simuliert",
+    ),
+    ("computing · {count} games", "rechnet · {count} Partien"),
+    (
+        "provisional, still computing …",
+        "vorläufig, rechnet noch …",
+    ),
+    ("paused", "pausiert"),
+    (
+        "Close call: other moves are almost as good",
+        "Knappe Sache: Andere Züge sind fast gleich gut",
+    ),
+    ("Technical details", "Technische Details"),
+    (
+        "{count} games · {seconds} s computing",
+        "{count} Partien · {seconds} s Rechenzeit",
+    ),
+    ("Win {win} · tie {tie}", "Sieg {win} · Gleichstand {tie}"),
+    ("The computer is playing …", "Der Computer spielt …"),
+    (
+        "Analysis waits until the sheets fit together.",
+        "Die Analyse wartet, bis die Blätter zusammenpassen.",
+    ),
+    // Phone: dice.
+    ("{name} is up", "{name} ist dran"),
+    ("Game finished", "Spiel beendet"),
+    (
+        "The sheets do not fit together",
+        "Die Blätter passen nicht zusammen",
+    ),
+    ("roll", "Wurf"),
+    (
+        "Enter all five dice for advice.",
+        "Für einen Rat alle fünf Würfel eingeben.",
+    ),
+    ("Roll the dice", "Würfeln"),
+    ("Reroll {count} dice", "{count} Würfel neu würfeln"),
+    // Phone: score sheet.
+    ("Bonus", "Bonus"),
+    ("Total", "Endsumme"),
+    // Phone: menu.
+    (
+        "New position (same players)",
+        "Neue Stellung (gleiche Spieler)",
+    ),
+    ("New game …", "Neues Spiel …"),
+    ("Appearance", "Darstellung"),
+    ("Light", "Hell"),
+    ("Dark", "Dunkel"),
+    ("System", "System"),
+    ("Thinking time", "Rechenzeit"),
+    ("Quick", "Schnell"),
+    ("Thorough", "Gründlich"),
+    ("No limit", "Ohne Limit"),
+    ("Save", "Speichern"),
+    ("Advanced …", "Erweitert …"),
 ];
 
 #[cfg(test)]
@@ -188,6 +328,20 @@ mod tests {
             };
             assert_eq!(names(english), names(german), "{english}");
         }
+    }
+
+    #[test]
+    fn numbers_follow_the_language() {
+        assert_eq!(percent(0.583, 1), "58.3%");
+        assert_eq!(count(6400), "6,400");
+        assert_eq!(count(999), "999");
+        set_language(Language::German);
+        assert_eq!(percent(0.583, 1), "58,3\u{a0}%");
+        assert_eq!(percent(0.5, 0), "50\u{a0}%");
+        assert_eq!(count(1_234_567), "1\u{a0}234\u{a0}567");
+        assert_eq!(decimal(241.25, 1), "241,2");
+        assert_eq!(category_short(6), "3er-Pasch");
+        set_language(Language::English);
     }
 
     #[test]

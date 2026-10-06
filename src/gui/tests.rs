@@ -1172,6 +1172,10 @@ fn score_cell_center(ctx: &egui::Context, player: usize, category: usize) -> egu
             .center()
     })
 }
+fn phone_cell_rect(ctx: &egui::Context, player: usize, category: usize) -> egui::Rect {
+    ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("phone_cell", player, category))))
+        .expect("phone sheet cell")
+}
 fn wheel_at(app: &mut Desktop, ctx: &egui::Context, player: usize, category: usize, y: f32) {
     let pos = score_cell_center(ctx, player, category);
     render(
@@ -1353,7 +1357,15 @@ fn score_wheel_scope_validation_settings_and_layouts() {
             for _ in 0..2 {
                 render_size(&mut app, &ctx, vec![], size);
             }
-            let original = score_cell_center(&ctx, 0, 0);
+            // Below 600 points the phone layout shows the sheet.
+            let cell_y = |ctx: &egui::Context| {
+                if size[0] < super::phone::PHONE_WIDTH {
+                    phone_cell_rect(ctx, 0, 0).center().y
+                } else {
+                    score_cell_center(ctx, 0, 0).y
+                }
+            };
+            let original = cell_y(&ctx);
             let pointer = if size[0] >= 950. {
                 egui::pos2(600., 800.)
             } else {
@@ -1372,7 +1384,7 @@ fn score_wheel_scope_validation_settings_and_layouts() {
                 render_size(&mut app, &ctx, vec![], size);
             }
             if size[0] < 950. {
-                assert!(score_cell_center(&ctx, 0, 0).y < original.y);
+                assert!(cell_y(&ctx) < original);
             }
             assert!(
                 app.game.session().position.players[0]
@@ -2590,4 +2602,111 @@ fn compute_longer_continues_a_finished_limited_analysis_for_one_position() {
     app.commit(next);
     render(&mut app, &ctx, vec![]);
     assert!(!recorder.requests.borrow().last().unwrap().continuous);
+}
+
+const PHONE: [f32; 2] = [390.0, 844.0];
+
+fn phone_rect(ctx: &egui::Context, key: impl std::hash::Hash) -> egui::Rect {
+    ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new(key)))
+        .expect("phone widget")
+}
+
+#[test]
+fn phone_layout_enters_dice_sets_the_roll_and_opens_the_picker() {
+    let ctx = egui::Context::default();
+    let (mut app, _recorder) = recorded_editor(2);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    let shown = texts(&output);
+    for label in ["Player 1 is up", "1.", "2.", "3.", "roll", "1s", "Bonus"] {
+        assert!(shown.contains(&label.to_string()), "{label} missing");
+    }
+    assert!(
+        !shown.contains(&"File".to_string()),
+        "desktop toolbar shown on a phone"
+    );
+    for face in [6, 6, 6, 2, 3] {
+        let rect = phone_rect(&ctx, ("phone_face_rect", face));
+        click_size(&mut app, &ctx, rect.center(), PHONE);
+    }
+    app.flush_correction(Instant::now() + Duration::from_secs(5));
+    assert!(matches!(
+        app.game.session().position.phase,
+        Phase::Decision {
+            rerolls_left: 2,
+            ..
+        }
+    ));
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    click_size(&mut app, &ctx, label_center(&output, "2."), PHONE);
+    assert!(matches!(
+        app.game.session().position.phase,
+        Phase::Decision {
+            rerolls_left: 1,
+            ..
+        }
+    ));
+    let cell = phone_rect(&ctx, ("phone_cell", 1_usize, 0_usize));
+    assert!(cell.height() >= 44.0 && cell.max.y < PHONE[1]);
+    click_size(&mut app, &ctx, cell.center(), PHONE);
+    assert_eq!(app.edit, Some((1, 0)));
+}
+
+#[test]
+fn phone_advice_card_applies_the_recommendation() {
+    let ctx = egui::Context::default();
+    let (mut app, recorder) = recorded_editor(2);
+    enter_roll(&mut app, [6, 6, 6, 6, 6]);
+    render_size(&mut app, &ctx, vec![], PHONE);
+    let request = recorder.requests.borrow().last().unwrap().clone();
+    let settings = Settings {
+        method: Method::Rollout,
+        simulations: 200,
+        time_ms: 0,
+        ..request.settings.clone()
+    };
+    let report = solver::analyze(&request.position, &settings, Cancel::default()).unwrap();
+    let best = report.best_action.unwrap();
+    assert_eq!(best, Action::Write { category: 11 });
+    recorder.inject(AnalysisUpdate {
+        key: request.key,
+        report: Ok(report),
+        finished: true,
+        paused: false,
+    });
+    render_size(&mut app, &ctx, vec![], PHONE);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    let shown = texts(&output);
+    assert!(
+        shown.contains(&"Score Kniffel: 50 points".to_string()),
+        "{shown:?}"
+    );
+    assert!(shown.iter().any(|t| t.starts_with("Chance of winning")));
+    let apply = phone_rect(&ctx, ("phone_move", best));
+    assert!(apply.height() >= 44.0);
+    click_size(&mut app, &ctx, apply.center(), PHONE);
+    assert_eq!(
+        app.game.session().position.players[0].sheet.cells[11],
+        Some(50)
+    );
+    assert_eq!(app.game.session().position.active_player, 1);
+}
+
+#[test]
+fn new_position_keeps_the_players() {
+    let mut app = startup(Session::new(3), None);
+    app.execute(Pending::Analyze(3));
+    let mut next = app.game.session().clone();
+    next.position.players[0].name = "Anna".into();
+    next.position.players[1].name = "Ben".into();
+    next.position.turn_order = vec![1, 2, 0];
+    next.position.players[2].sheet.cells[0] = Some(3);
+    app.commit(next);
+    app.execute(Pending::Fresh);
+    let position = &app.game.session().position;
+    assert_eq!(position.players[0].name, "Anna");
+    assert_eq!(position.players[1].name, "Ben");
+    assert_eq!(position.turn_order, vec![1, 2, 0]);
+    assert_eq!(position.active_player, 1);
+    assert!(position.players.iter().all(|p| p.sheet.open() == 13));
+    assert!(app.game.position_editor());
 }
