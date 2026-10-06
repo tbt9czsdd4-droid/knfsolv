@@ -26,6 +26,7 @@ pub struct Preferences {
     pub custom_search: bool,
     pub custom_settings: Settings,
     pub analysis_players: usize,
+    pub text_size: TextSize,
 }
 fn serialize_engine<S: serde::Serializer>(
     settings: &Settings,
@@ -42,6 +43,22 @@ pub enum Theme {
     System,
     Dark,
     Light,
+}
+/// „Schriftgröße“: the whole interface scales, as iOS's text size setting cannot reach a canvas.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextSize {
+    #[default]
+    Normal,
+    Large,
+}
+impl TextSize {
+    pub fn zoom(self) -> f32 {
+        match self {
+            TextSize::Normal => 1.0,
+            TextSize::Large => 1.25,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -68,6 +85,7 @@ impl Default for Preferences {
                 ..Default::default()
             },
             analysis_players: 2,
+            text_size: TextSize::Normal,
         }
     }
 }

@@ -28,6 +28,18 @@ enum ThinkingTime {
     NoLimit,
 }
 
+/// „Anna ist dran“, but „Ich bin dran“ for the analyzer's default first player and „Du bist
+/// dran“ for the computer game's default human ("You").
+fn is_up(name: &str) -> String {
+    if name == super::start::default_name(0) {
+        t("I am up").to_string()
+    } else if name == "You" || name == t("You") {
+        t("You are up").to_string()
+    } else {
+        tf("{name} is up", &[("name", &name)])
+    }
+}
+
 /// One of several options, as a 44-point button that shows whether it is chosen.
 fn choice(ui: &mut egui::Ui, selected: bool, label: &str) -> bool {
     ui.add(
@@ -129,6 +141,18 @@ impl Desktop {
                 ui.ctx().set_theme(theme);
             }
         });
+        ui.label(t("Text size"));
+        ui.horizontal(|ui| {
+            use crate::preferences::TextSize;
+            for (value, label) in [
+                (TextSize::Normal, t("Normal")),
+                (TextSize::Large, t("Large")),
+            ] {
+                if choice(ui, self.text_size == value, label) {
+                    self.text_size = value;
+                }
+            }
+        });
         ui.label(t("Thinking time"));
         ui.horizontal(|ui| {
             let current = self.thinking_time();
@@ -216,10 +240,7 @@ impl Desktop {
             Ok(Some(player)) if editor && position.hypothetical => {
                 (position.players[player].name.clone(), false)
             }
-            Ok(Some(player)) => (
-                tf("{name} is up", &[("name", &position.players[player].name)]),
-                false,
-            ),
+            Ok(Some(player)) => (is_up(&position.players[player].name), false),
             Ok(None) => (t("Game finished").to_string(), false),
             Err(_) => (t("The sheets do not fit together").to_string(), true),
         };
@@ -239,7 +260,11 @@ impl Desktop {
             let name = &self.game.session().position.players
                 [self.game.session().position.active_player]
                 .name;
-            let note = tf("Assumed: {name} is up", &[("name", name)]);
+            let note = if *name == super::start::default_name(0) {
+                t("Assumed: I am up").to_string()
+            } else {
+                tf("Assumed: {name} is up", &[("name", name)])
+            };
             ui.horizontal_wrapped(|ui| {
                 ui.label(note);
                 if big_button(ui, t("Determine automatically"), true) {

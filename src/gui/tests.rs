@@ -2836,3 +2836,60 @@ fn phone_asks_who_is_up_when_sheets_do_not_fit() {
     );
     assert!(!app.game.session().position.hypothetical);
 }
+
+#[test]
+fn phone_start_asks_who_is_playing_and_opens_the_analyzer() {
+    let ctx = egui::Context::default();
+    let mut app = startup(Session::new(2), None);
+    assert_eq!(app.screen, Screen::Home);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    assert!(!texts(&output).contains(&"Session path".to_string()));
+    click_size(
+        &mut app,
+        &ctx,
+        label_center(&output, "Analyze a position"),
+        PHONE,
+    );
+    assert_eq!(app.screen, Screen::AnalysisSetup);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    assert!(texts(&output).contains(&"Who is playing?".to_string()));
+    click_size(&mut app, &ctx, label_center(&output, "3"), PHONE);
+    render_size(&mut app, &ctx, vec![], PHONE);
+    app.setup_names[1] = " Anna ".into();
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    click_size(&mut app, &ctx, label_center(&output, "Start"), PHONE);
+    assert_eq!(app.screen, Screen::Play);
+    assert!(app.game.position_editor());
+    let names: Vec<_> = app
+        .game
+        .session()
+        .position
+        .players
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert_eq!(names, ["Me", "Anna", "Player 3"]);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    assert!(texts(&output).contains(&"I am up".to_string()));
+}
+
+#[test]
+fn text_size_zooms_the_interface_and_is_remembered() {
+    let ctx = egui::Context::default();
+    let mut app = startup(Session::new(2), Some("position.json".into()));
+    render_size(&mut app, &ctx, vec![], PHONE);
+    assert_eq!(ctx.zoom_factor(), 1.0);
+    app.text_size = crate::preferences::TextSize::Large;
+    render_size(&mut app, &ctx, vec![], PHONE);
+    render_size(&mut app, &ctx, vec![], PHONE);
+    assert_eq!(ctx.zoom_factor(), 1.25);
+    assert_eq!(
+        app.preferences.as_ref().unwrap().text_size,
+        crate::preferences::TextSize::Large
+    );
+    // A zoom changed elsewhere (Ctrl +/− on the desktop) is left alone until the setting changes.
+    ctx.set_zoom_factor(1.5);
+    render_size(&mut app, &ctx, vec![], PHONE);
+    render_size(&mut app, &ctx, vec![], PHONE);
+    assert_eq!(ctx.zoom_factor(), 1.5);
+}

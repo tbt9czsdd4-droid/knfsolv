@@ -26,11 +26,14 @@ pub mod i18n;
 mod phone;
 mod picker;
 mod players;
+mod start;
 
 enum Pending {
     Local(LocalGameConfig),
     Computer(ComputerGameConfig),
     Analyze(usize),
+    /// The analyzer with these players, in playing order, and empty sheets.
+    AnalyzeNamed(Vec<String>),
     /// A new position with the current players' names and order, and empty sheets.
     Fresh,
     Load(PathBuf),
@@ -72,8 +75,13 @@ pub struct Desktop {
     edit: Option<(usize, usize)>,
     /// The open player sheet in the position editor, with its unapplied changes.
     player_sheet: Option<players::PlayerDraft>,
+    /// Names typed on the phone's „Wer spielt mit?“ screen.
+    setup_names: Vec<String>,
     score_wheel: ScoreWheel,
     score_wheel_limits: ScoreWheelLimits,
+    text_size: crate::preferences::TextSize,
+    /// The zoom set from `text_size`; other zoom changes (Ctrl +/−) stay until it changes.
+    applied_zoom: Option<f32>,
     show_settings: bool,
     engine_tab: bool,
     preferences: Option<crate::preferences::Preferences>,
@@ -425,8 +433,11 @@ impl Desktop {
             message: String::new(),
             edit: None,
             player_sheet: None,
+            setup_names: Vec::new(),
             score_wheel: ScoreWheel::default(),
             score_wheel_limits: ScoreWheelLimits::default(),
+            text_size: Default::default(),
+            applied_zoom: None,
             show_settings: false,
             engine_tab: true,
             preferences: None,
@@ -515,6 +526,7 @@ impl Desktop {
         self.custom_settings = p.custom_settings.clone();
         self.analysis_players = p.analysis_players;
         self.score_wheel_limits = p.score_wheel_limits;
+        self.text_size = p.text_size;
         self.analysis_mode = p.analysis_mode;
         self.analysis_paused = p.analysis_paused;
         self.game.set_global_advice(&p.engine);
@@ -549,6 +561,7 @@ impl Desktop {
             p.custom_settings = self.custom_settings.clone();
             p.analysis_players = self.analysis_players;
             p.score_wheel_limits = self.score_wheel_limits;
+            p.text_size = self.text_size;
             p.analysis_mode = self.analysis_mode;
             p.analysis_paused = self.analysis_paused;
             if let Some(store) = &mut self.preference_store {
@@ -736,9 +749,9 @@ impl Desktop {
                     return;
                 }
                 self.refresh_revision();
-                self.started_session(
+                self.started_session(t(
                     "New local game. Choose which dice to keep; click a score to end each turn.",
-                );
+                ));
             }
             Pending::Computer(config) => {
                 let result = config
@@ -749,7 +762,7 @@ impl Desktop {
                     return;
                 }
                 self.refresh_revision();
-                self.started_session("New computer game. Human rolls wait for your input; computer dice are generated automatically.");
+                self.started_session(t("New computer game. Human rolls wait for your input; computer dice are generated automatically."));
             }
             Pending::Fresh => {
                 let current = &self.game.session().position;
@@ -767,17 +780,13 @@ impl Desktop {
                 self.refresh_revision();
                 self.started_session("");
             }
-            Pending::Analyze(n) => {
-                if let Err(e) = self.game.replace_session(Session::new(n)) {
-                    self.message = e.to_string();
-                    return;
+            Pending::Analyze(n) => self.start_editor(Session::new(n)),
+            Pending::AnalyzeNamed(names) => {
+                let mut session = Session::new(names.len());
+                for (player, name) in session.position.players.iter_mut().zip(names) {
+                    player.name = name;
                 }
-                self.refresh_revision();
-                if self.preferences.is_none() {
-                    self.analysis_mode = AnalysisMode::Continuous;
-                    self.analysis_paused = false;
-                }
-                self.started_session("Edit scores to forecast the next player. Dice are optional; enter five for move advice.");
+                self.start_editor(session);
             }
             Pending::Load(path) => match self.game.load(&path) {
                 Ok(()) => {
@@ -792,6 +801,18 @@ impl Desktop {
                 Err(e) => self.message = e.to_string(),
             },
         }
+    }
+    fn start_editor(&mut self, session: Session) {
+        if let Err(e) = self.game.replace_session(session) {
+            self.message = e.to_string();
+            return;
+        }
+        self.refresh_revision();
+        if self.preferences.is_none() {
+            self.analysis_mode = AnalysisMode::Continuous;
+            self.analysis_paused = false;
+        }
+        self.started_session(t("Edit scores to forecast the next player. Dice are optional; enter five for move advice."));
     }
     fn opened(&mut self, message: String) {
         self.refresh_revision();
@@ -2373,6 +2394,12 @@ impl Desktop {
     }
     fn contents(&mut self, ui: &mut egui::Ui) {
         *self.repaint.lock().unwrap() = Some(ui.ctx().clone());
+        let zoom = self.text_size.zoom();
+        if self.applied_zoom != Some(zoom) {
+            // Takes effect from the next frame on.
+            ui.ctx().set_zoom_factor(zoom);
+            self.applied_zoom = Some(zoom);
+        }
         self.poll();
         self.poll_opened();
         let ctx = ui.ctx().clone();
@@ -2396,7 +2423,12 @@ impl Desktop {
             || self.show_settings;
         ui.add_enabled_ui(!modal, |ui| {
             if self.screen != Screen::Play {
-                self.setup_ui(ui);
+                let phone = ui.available_width() < phone::PHONE_WIDTH;
+                match self.screen {
+                    Screen::Home if phone => self.phone_start_ui(ui),
+                    Screen::AnalysisSetup if phone => self.phone_players_ui(ui),
+                    _ => self.setup_ui(ui),
+                }
                 return;
             }
             if ui.available_width() < phone::PHONE_WIDTH {

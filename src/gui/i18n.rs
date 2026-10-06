@@ -210,6 +210,10 @@ const GERMAN: &[(&str, &str)] = &[
     ("The computer is playing …", "Der Computer spielt …"),
     // Phone: dice.
     ("{name} is up", "{name} ist dran"),
+    ("I am up", "Ich bin dran"),
+    ("You", "Du"),
+    ("You are up", "Du bist dran"),
+    ("Assumed: I am up", "Annahme: Ich bin dran"),
     ("Game finished", "Spiel beendet"),
     (
         "The sheets do not fit together",
@@ -235,6 +239,9 @@ const GERMAN: &[(&str, &str)] = &[
     ("Light", "Hell"),
     ("Dark", "Dunkel"),
     ("System", "System"),
+    ("Text size", "Schriftgröße"),
+    ("Normal", "Normal"),
+    ("Large", "Groß"),
     ("Thinking time", "Rechenzeit"),
     ("Quick", "Schnell"),
     ("Thorough", "Gründlich"),
@@ -265,6 +272,38 @@ const GERMAN: &[(&str, &str)] = &[
     ),
     ("Assumed: {name} is up", "Annahme: {name} ist dran"),
     ("Determine automatically", "Automatisch bestimmen"),
+    // Messages when a session starts.
+    (
+        "Edit scores to forecast the next player. Dice are optional; enter five for move advice.",
+        "Trage die Punkte ein; die App sagt voraus, wer gewinnt. Mit fünf Würfeln gibt es einen Zugvorschlag.",
+    ),
+    (
+        "New local game. Choose which dice to keep; click a score to end each turn.",
+        "Neues lokales Spiel. Tippe Würfel zum Behalten an; ein Eintrag im Blatt beendet den Zug.",
+    ),
+    (
+        "New computer game. Human rolls wait for your input; computer dice are generated automatically.",
+        "Neues Spiel gegen den Computer. Bei deinen Würfen wartet die App auf dich; der Computer würfelt automatisch.",
+    ),
+    // Phone start screens.
+    (
+        "Copy the score sheets, tap in the dice, and see the best move with its chance of winning.",
+        "Übertrage die Spielblätter, tippe die Würfel ein und sieh den besten Zug mit seiner Gewinnchance.",
+    ),
+    ("Back to the position", "Zurück zur Stellung"),
+    ("Analyze a position", "Stellung analysieren"),
+    ("Play instead of analyzing:", "Spielen statt analysieren:"),
+    ("Local game", "Lokales Spiel"),
+    ("Against the computer", "Gegen den Computer"),
+    ("Who is playing?", "Wer spielt mit?"),
+    (
+        "In playing order, starting with whoever began. Names are optional.",
+        "In Spielreihenfolge, beginnend mit dem, der angefangen hat. Namen sind freiwillig.",
+    ),
+    ("Me", "Ich"),
+    ("Player {number}", "Spieler {number}"),
+    ("Start", "Los geht's"),
+    ("Back", "Zurück"),
 ];
 
 #[cfg(test)]
