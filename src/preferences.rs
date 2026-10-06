@@ -72,6 +72,19 @@ impl Default for Preferences {
     }
 }
 impl Preferences {
+    /// Phones analyze each position for a limited time (about 3 s or 20,000 games), which
+    /// saves battery; „Länger rechnen“ continues a finished analysis.
+    pub fn phone() -> Self {
+        Self {
+            analysis_mode: AnalysisMode::Limited,
+            engine: Settings {
+                time_ms: 3_000,
+                simulations: 20_000,
+                ..Settings::default()
+            },
+            ..Self::default()
+        }
+    }
     fn validate(&self) -> Result<()> {
         if self.version != 1
             || self.engine.perspective != 0
@@ -202,6 +215,16 @@ impl Drop for Store {
 mod tests {
     use super::*;
     use crate::persistence::FileStorage;
+    #[test]
+    fn phone_defaults_are_valid_limited_analysis() {
+        let phone = Preferences::phone();
+        phone.validate().unwrap();
+        assert_eq!(phone.analysis_mode, AnalysisMode::Limited);
+        assert_eq!(phone.engine.time_ms, 3_000);
+        let json = crate::persistence::to_json(&phone).unwrap();
+        assert_eq!(serde_json::from_str::<Preferences>(&json).unwrap(), phone);
+    }
+
     #[test]
     fn score_wheel_preference_defaults_and_persists() {
         let old: Preferences = serde_json::from_str(r#"{"version":1}"#).unwrap();

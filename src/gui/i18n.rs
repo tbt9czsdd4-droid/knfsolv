@@ -97,6 +97,10 @@ const GERMAN: &[(&str, &str)] = &[
     ("Open", "Offen"),
     ("Cross out (0)", "Streichen (0)"),
     ("Cancel", "Abbrechen"),
+    // Advice.
+    ("Apply suggestion", "Übernehmen"),
+    ("Apply this move", "Diesen Zug übernehmen"),
+    ("Compute longer", "Länger rechnen"),
 ];
 
 #[cfg(test)]

@@ -51,6 +51,7 @@ fn main() {
             .and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok())
             .expect("index.html contains <canvas id=\"app\">");
         let session = startup_session();
+        store_phone_defaults();
         let debug = query().contains("debug");
         request_persistent_storage();
         let text_fields = keyboard::Shared::default();
@@ -198,6 +199,19 @@ fn startup_session() -> Startup {
                 restored: None,
             }
         }
+    }
+}
+
+/// Without stored preferences, starts from the phone defaults: limited analysis per position.
+#[cfg(target_arch = "wasm32")]
+fn store_phone_defaults() {
+    use knfsolv::persistence::{Storage, to_json};
+    let preferences = storage::LocalStorage(storage::PREFERENCES);
+    if matches!(preferences.read(), Ok(None))
+        && let Ok(json) = to_json(&knfsolv::preferences::Preferences::phone())
+        && let Err(error) = preferences.write(&json)
+    {
+        log::warn!("Phone defaults not stored: {error}");
     }
 }
 

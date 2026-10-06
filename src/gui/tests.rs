@@ -2426,3 +2426,168 @@ fn score_picker_is_german_in_the_web_app() {
         );
     }
 }
+
+/// Records what the interface asks of its computation, and hands back injected reports.
+#[derive(Clone, Default)]
+struct Recorder {
+    requests: Rc<RefCell<Vec<AnalysisRequest>>>,
+    controls: Rc<RefCell<Vec<(AnalysisKey, bool, bool)>>>,
+    updates: Rc<RefCell<Vec<AnalysisUpdate>>>,
+}
+impl Computation for Recorder {
+    fn submit(&self, request: AnalysisRequest) -> Result<()> {
+        self.requests.borrow_mut().push(request);
+        Ok(())
+    }
+    fn controls(&self, key: AnalysisKey, continuous: bool, paused: bool) {
+        self.controls.borrow_mut().push((key, continuous, paused));
+    }
+    fn clear(&self) {}
+    fn take_updates(&self) -> Vec<AnalysisUpdate> {
+        std::mem::take(&mut *self.updates.borrow_mut())
+    }
+    fn inject(&self, update: AnalysisUpdate) {
+        self.updates.borrow_mut().push(update);
+    }
+}
+
+fn recorded_editor(players: usize) -> (Desktop, Recorder) {
+    let recorder = Recorder::default();
+    let mut app =
+        Desktop::with_computation(Session::new(players), None, |_| Box::new(recorder.clone()));
+    app.execute(Pending::Analyze(players));
+    (app, recorder)
+}
+
+fn enter_roll(app: &mut Desktop, faces: [u8; 5]) {
+    let now = Instant::now();
+    for face in faces {
+        app.choose_face(face, now);
+    }
+    app.flush_correction(now + Duration::from_secs(5));
+}
+
+#[test]
+fn editor_applies_reroll_and_score_advice() {
+    let mut app = startup(Session::new(2), None);
+    app.execute(Pending::Analyze(2));
+    app.choose_face(6, Instant::now());
+    assert!(!app.game.can_apply_advice());
+    app.game.undo();
+    enter_roll(&mut app, [6, 6, 6, 2, 3]);
+    assert!(app.game.can_apply_advice());
+    let keep = Dice::from_faces(&[6, 6, 6]).unwrap();
+    app.apply(Action::Reroll { keep }).unwrap();
+    assert!(matches!(
+        app.game.session().position.phase,
+        Phase::AwaitingRoll {
+            rerolls_after: 1,
+            ..
+        }
+    ));
+    let mut faces = app.game.dice().faces;
+    faces.sort_unstable();
+    assert_eq!(faces, [0, 0, 6, 6, 6]);
+    assert!(!app.game.can_apply_advice());
+    let now = Instant::now();
+    for face in [6, 6] {
+        app.choose_face(face, now);
+    }
+    app.flush_correction(now + Duration::from_secs(5));
+    let kniffel = Phase::Decision {
+        dice: Dice::from_faces(&[6; 5]).unwrap(),
+        rerolls_left: 1,
+    };
+    assert_eq!(app.game.session().position.phase, kniffel);
+    app.apply(Action::Write { category: 11 }).unwrap();
+    let position = &app.game.session().position;
+    assert_eq!(position.players[0].sheet.cells[11], Some(50));
+    assert_eq!(position.active_player, 1);
+    assert_eq!(position.phase, Phase::BeforeFirstRoll);
+    app.undo(false);
+    assert_eq!(app.game.session().position.phase, kniffel);
+}
+
+#[test]
+fn editor_keeps_dice_while_the_same_player_rolls() {
+    let mut app = startup(Session::new(3), None);
+    app.execute(Pending::Analyze(3));
+    let set = |app: &mut Desktop, player: usize, value: Option<u16>| {
+        let mut next = app.game.session().clone();
+        next.position.players[player].sheet.cells[12] = value;
+        app.commit(next);
+    };
+    set(&mut app, 0, Some(20));
+    assert_eq!(app.game.session().position.active_player, 1);
+    enter_roll(&mut app, [1, 2, 3, 4, 5]);
+    let rolled = app.game.session().position.phase;
+    assert!(matches!(rolled, Phase::Decision { .. }));
+    // A forgotten entry of another player, and its removal, leave player 2 rolling.
+    set(&mut app, 2, Some(17));
+    assert_eq!(app.game.session().position.phase, rolled);
+    assert_eq!(app.game.dice().faces, [1, 2, 3, 4, 5]);
+    set(&mut app, 2, None);
+    assert_eq!(app.game.session().position.phase, rolled);
+    assert_eq!(app.game.session().position.active_player, 1);
+    // Player 2's own entry hands the roll to player 3, whose dice are not entered yet.
+    set(&mut app, 1, Some(15));
+    assert_eq!(app.game.session().position.active_player, 2);
+    assert_eq!(app.game.session().position.phase, Phase::BeforeFirstRoll);
+    assert_eq!(app.game.dice().faces, [0; 5]);
+}
+
+#[test]
+fn a_single_player_gets_expected_score_advice() {
+    let ctx = egui::Context::default();
+    for (players, objective) in [(1, Objective::ExpectedScore), (2, Objective::SharedFirst)] {
+        let (mut app, recorder) = recorded_editor(players);
+        enter_roll(&mut app, [1, 2, 3, 4, 5]);
+        render(&mut app, &ctx, vec![]);
+        let requests = recorder.requests.borrow();
+        assert_eq!(requests.last().unwrap().settings.objective, objective);
+    }
+}
+
+#[test]
+fn compute_longer_continues_a_finished_limited_analysis_for_one_position() {
+    let ctx = egui::Context::default();
+    let (mut app, recorder) = recorded_editor(2);
+    app.analysis_controls(AnalysisMode::Limited, false);
+    enter_roll(&mut app, [1, 1, 2, 5, 5]);
+    render(&mut app, &ctx, vec![]);
+    let request = recorder.requests.borrow().last().unwrap().clone();
+    assert!(!request.continuous);
+    let settings = Settings {
+        method: Method::Rollout,
+        simulations: 400,
+        time_ms: 0,
+        ..request.settings.clone()
+    };
+    let report = solver::analyze(&request.position, &settings, Cancel::default()).unwrap();
+    recorder.inject(AnalysisUpdate {
+        key: request.key,
+        report: Ok(report),
+        finished: true,
+        paused: false,
+    });
+    render_size(&mut app, &ctx, vec![], TALL);
+    let output = render_size(&mut app, &ctx, vec![], TALL);
+    assert!(texts(&output).contains(&"Apply suggestion".to_string()));
+    click_size(
+        &mut app,
+        &ctx,
+        label_center(&output, "Compute longer"),
+        TALL,
+    );
+    assert_eq!(
+        recorder.controls.borrow().last(),
+        Some(&(request.key, true, false))
+    );
+    assert!(!app.analysis_done);
+    // The next position is analyzed with the chosen limit again.
+    let mut next = app.game.session().clone();
+    next.position.players[1].name = "Edited".into();
+    app.commit(next);
+    render(&mut app, &ctx, vec![]);
+    assert!(!recorder.requests.borrow().last().unwrap().continuous);
+}

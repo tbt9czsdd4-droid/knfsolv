@@ -742,23 +742,28 @@ impl GameController {
                     .map(|p| p.sheet.open())
                     .collect::<Vec<_>>();
         if self.position_editor() {
-            if turns_changed {
-                next.position.phase = Phase::BeforeFirstRoll;
-            }
             if next.position.open() == 0 {
                 next.position.phase = Phase::Finished;
-            } else if !next.position.hypothetical {
-                if let Ok(Some(player)) = next.position.infer_next_player() {
+            } else {
+                if !next.position.hypothetical
+                    && let Ok(Some(player)) = next.position.infer_next_player()
+                {
                     next.position.active_player = player;
                     next.settings.perspective = player;
                 }
-                if self.session.position.hypothetical != next.position.hypothetical {
+                // Entered dice belong to the rolling player: they stay through edits, such as a
+                // forgotten entry of another player, as long as that player still rolls.
+                let roller_changed =
+                    next.position.active_player != self.session.position.active_player;
+                if (turns_changed && roller_changed)
+                    || self.session.position.phase == Phase::Finished
+                    || (self.session.position.hypothetical && !next.position.hypothetical)
+                {
                     next.position.phase = Phase::BeforeFirstRoll;
                 }
             }
         }
-        let reset = (self.position_editor() && turns_changed)
-            || next.position.phase != self.session.position.phase
+        let reset = next.position.phase != self.session.position.phase
             || next.position.active_player != self.session.position.active_player;
         let actor = self.session.position.active_player;
         let human_boundary = self.editing || self.control() == PlayerControl::Human;
@@ -980,6 +985,25 @@ impl GameController {
                     "Enter the physical roll using the face palette".into(),
                 ))
             };
+        }
+        self.apply_action(action, true, now)
+    }
+    /// Whether the position editor can apply advice: complete dice and consistent sheets.
+    pub fn can_apply_advice(&self) -> bool {
+        self.position_editor()
+            && !self.decision_pending()
+            && matches!(self.session.position.phase, Phase::Decision { .. })
+            && self.session.validate().is_ok()
+            && (self.session.position.hypothetical
+                || self.session.position.infer_next_player().is_ok())
+    }
+    /// „Übernehmen“ in the position editor: a reroll locks the kept dice and waits for the new
+    /// ones, a score is written and the next player is up. One Undo step, like a played move.
+    pub fn apply_advice(&mut self, action: Action, now: Instant) -> Result<()> {
+        if !self.can_apply_advice() {
+            return Err(Error::Invalid(
+                "Enter five dice for a consistent position before applying advice".into(),
+            ));
         }
         self.apply_action(action, true, now)
     }

@@ -95,6 +95,8 @@ pub struct Desktop {
     analysis_mode: AnalysisMode,
     analysis_paused: bool,
     analysis_done: bool,
+    /// „Länger rechnen“: a finished limited analysis continues for the current position.
+    extended: bool,
     running: Option<Instant>,
 }
 
@@ -448,6 +450,7 @@ impl Desktop {
             analysis_mode: advisor.mode,
             analysis_paused: advisor.paused,
             analysis_done: false,
+            extended: false,
             running: None,
         }
     }
@@ -591,6 +594,7 @@ impl Desktop {
     fn refresh_revision(&mut self) {
         if self.observed_revision != self.game.revision() {
             self.worker.clear();
+            self.extended = false;
             self.requested = None;
             self.computer_requested = None;
             self.computer_fallback = false;
@@ -630,7 +634,11 @@ impl Desktop {
         self.refresh_revision();
     }
     fn apply(&mut self, action: Action) -> Result<()> {
-        self.game.play(action, Instant::now())?;
+        if self.game.position_editor() {
+            self.game.apply_advice(action, Instant::now())?;
+        } else {
+            self.game.play(action, Instant::now())?;
+        }
         self.refresh_revision();
         self.message = "Move applied.".into();
         Ok(())
@@ -804,17 +812,21 @@ impl Desktop {
         self.report = None;
         self.analysis_done = false;
         self.running = Some(Instant::now());
-        let settings = if self.game.editing() {
+        let mut settings = if self.game.editing() {
             self.game.session().settings.clone()
         } else {
             self.game.coaching_settings()
         };
+        // Alone, every move "wins"; advice then maximizes the expected final score.
+        if self.game.session().position.players.len() == 1 {
+            settings.objective = Objective::ExpectedScore;
+        }
         let key = self.analysis_key();
         self.worker.submit(AnalysisRequest {
             key,
             position: self.game.session().position.clone(),
             settings,
-            continuous: self.analysis_mode == AnalysisMode::Continuous,
+            continuous: self.analysis_mode == AnalysisMode::Continuous || self.extended,
             paused: self.analysis_paused,
             baseline_only: false,
         })?;
@@ -827,7 +839,17 @@ impl Desktop {
             serial: self.analysis_serial,
         }
     }
+    /// Continues the finished limited search, keeping its evidence, until the position changes.
+    fn compute_longer(&mut self) {
+        self.extended = true;
+        self.analysis_done = false;
+        if let Some(key) = self.requested {
+            self.worker.controls(key, true, self.analysis_paused);
+            self.running = (!self.analysis_paused).then(Instant::now);
+        }
+    }
     fn analysis_controls(&mut self, mode: AnalysisMode, paused: bool) {
+        self.extended = false;
         self.analysis_mode = mode;
         self.analysis_paused = paused;
         self.game.set_advisor_controls(mode, paused);
@@ -1549,6 +1571,16 @@ impl Desktop {
             if self.running.is_some() && !paused {
                 ui.spinner();
             }
+            if self.analysis_done
+                && self.analysis_mode == AnalysisMode::Limited
+                && !self
+                    .report
+                    .as_ref()
+                    .is_some_and(|r| r.status == "exact_under_model")
+                && ui.button(t("Compute longer")).clicked()
+            {
+                self.compute_longer();
+            }
             if self.analysis_done && ui.button("Restart analysis").clicked() {
                 let result = self.analyze(ui.ctx());
                 self.outcome(result);
@@ -1775,29 +1807,31 @@ impl Desktop {
                         }
                         move_statistics(ui, estimate.and_then(|a| a.metrics));
                         ui.push_id(("play_move", action), |ui| {
-                            let response = ui.add_enabled(
-                                self.game.human_can_play()
-                                    && self.game.session().position.actions().contains(&action),
-                                egui::Button::new(if recommended {
+                            // In the position editor, advice is applied rather than played.
+                            let (allowed, label) = if self.game.position_editor() {
+                                let label = if recommended {
+                                    t("Apply suggestion")
+                                } else {
+                                    t("Apply this move")
+                                };
+                                (self.game.can_apply_advice(), label)
+                            } else {
+                                let label = if recommended {
                                     "Play suggestion"
                                 } else {
                                     "Play this move"
-                                })
-                                .min_size(egui::vec2(120., 32.)),
+                                };
+                                (self.game.human_can_play(), label)
+                            };
+                            let response = ui.add_enabled(
+                                allowed && self.game.session().position.actions().contains(&action),
+                                egui::Button::new(label).min_size(egui::vec2(120., 32.)),
                             );
                             response.widget_info(|| {
                                 egui::WidgetInfo::labeled(
                                     egui::WidgetType::Button,
                                     response.enabled(),
-                                    format!(
-                                        "{}: {}",
-                                        if recommended {
-                                            "Play suggestion"
-                                        } else {
-                                            "Play this move"
-                                        },
-                                        self.move_title(action)
-                                    ),
+                                    format!("{label}: {}", self.move_title(action)),
                                 )
                             });
                             #[cfg(test)]
