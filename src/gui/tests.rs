@@ -1554,7 +1554,7 @@ fn headless_render_handles_sizes_phases_and_dialogs() {
             app.pending = None;
             app.show_settings = false;
             match modal {
-                1 => app.edit = Some((7, 12, "0".into())),
+                1 => app.edit = Some((7, 12)),
                 2 => {
                     for face in [6; 5] {
                         app.choose_face(face, Instant::now());
@@ -2274,5 +2274,155 @@ fn browser_rejects_unreadable_and_invalid_files_without_changes() {
         );
         assert!(app.pending.is_none());
         assert_eq!(app.game.session().position, current.position);
+    }
+}
+
+const TALL: [f32; 2] = [1180.0, 1600.0];
+
+fn picker_rect(ctx: &egui::Context, key: impl std::hash::Hash) -> Option<egui::Rect> {
+    ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("picker", key))))
+}
+fn picker_value_rect(ctx: &egui::Context, value: u16) -> Option<egui::Rect> {
+    picker_rect(ctx, value)
+}
+fn click_picker(app: &mut Desktop, ctx: &egui::Context, key: impl std::hash::Hash) {
+    let rect = picker_rect(ctx, key).expect("picker button");
+    click_size(app, ctx, rect.center(), TALL);
+}
+
+fn open_picker(
+    app: &mut Desktop,
+    ctx: &egui::Context,
+    player: usize,
+    category: usize,
+) -> egui::FullOutput {
+    render_size(app, ctx, vec![], TALL);
+    let cell = score_cell_center(ctx, player, category);
+    click_size(app, ctx, cell, TALL);
+    assert_eq!(app.edit, Some((player, category)));
+    ctx.data_mut(|d| {
+        for value in 1..=50_u16 {
+            d.remove::<egui::Rect>(egui::Id::new(("picker", value)));
+        }
+    });
+    render_size(app, ctx, vec![], TALL)
+}
+
+#[test]
+fn score_picker_offers_exactly_the_legal_values() {
+    let ctx = egui::Context::default();
+    let mut app = startup(Session::new(2), None);
+    app.execute(Pending::Analyze(2));
+    for category in 0..13 {
+        let output = open_picker(&mut app, &ctx, 1, category);
+        let legal: Vec<u16> = rules::category_scores(category)
+            .iter()
+            .copied()
+            .filter(|&v| v != 0)
+            .collect();
+        for value in 1..=50 {
+            assert_eq!(
+                picker_value_rect(&ctx, value).is_some(),
+                legal.contains(&value),
+                "{} offers {value}",
+                rules::NAMES[category]
+            );
+        }
+        for rect in legal.iter().filter_map(|&v| picker_value_rect(&ctx, v)) {
+            assert!(rect.width() >= 44.0 && rect.height() >= 44.0);
+        }
+        let shown = texts(&output);
+        assert!(
+            shown.contains(&"Open".to_string()) && shown.contains(&"Cross out (0)".to_string())
+        );
+        assert!(!shown.iter().any(|t| t.ends_with("with the current roll")));
+        click_picker(&mut app, &ctx, "cancel");
+        assert_eq!(app.edit, None);
+    }
+    assert_eq!(app.game.session(), &{
+        let mut empty = app.game.session().clone();
+        for player in &mut empty.position.players {
+            player.sheet = Default::default();
+        }
+        empty
+    });
+}
+
+#[test]
+fn score_picker_applies_one_tap_and_undo_restores() {
+    let ctx = egui::Context::default();
+    let mut app = startup(Session::new(2), None);
+    app.execute(Pending::Analyze(2));
+    open_picker(&mut app, &ctx, 0, 12);
+    let rect = picker_value_rect(&ctx, 23).unwrap();
+    click_size(&mut app, &ctx, rect.center(), TALL);
+    assert_eq!(app.edit, None);
+    assert_eq!(
+        app.game.session().position.players[0].sheet.cells[12],
+        Some(23)
+    );
+    open_picker(&mut app, &ctx, 0, 12);
+    click_picker(&mut app, &ctx, "cross_out");
+    assert_eq!(
+        app.game.session().position.players[0].sheet.cells[12],
+        Some(0)
+    );
+    open_picker(&mut app, &ctx, 0, 12);
+    click_picker(&mut app, &ctx, "open");
+    assert_eq!(app.game.session().position.players[0].sheet.cells[12], None);
+    app.undo(false);
+    assert_eq!(
+        app.game.session().position.players[0].sheet.cells[12],
+        Some(0)
+    );
+}
+
+#[test]
+fn score_picker_offers_the_current_roll_to_the_rolling_player() {
+    let ctx = egui::Context::default();
+    let mut app = startup(Session::new(2), None);
+    app.execute(Pending::Analyze(2));
+    for face in [3, 3, 3, 5, 6] {
+        app.choose_face(face, Instant::now());
+    }
+    app.flush_correction(Instant::now() + Duration::from_secs(5));
+    assert!(matches!(
+        app.game.session().position.phase,
+        Phase::Decision { .. }
+    ));
+    let output = open_picker(&mut app, &ctx, 0, 6);
+    assert!(texts(&output).contains(&"20 with the current roll".to_string()));
+    click_picker(&mut app, &ctx, "roll");
+    assert_eq!(
+        app.game.session().position.players[0].sheet.cells[6],
+        Some(20)
+    );
+    let output = open_picker(&mut app, &ctx, 1, 6);
+    assert!(
+        !texts(&output)
+            .iter()
+            .any(|t| t.ends_with("with the current roll"))
+    );
+}
+
+#[test]
+fn score_picker_is_german_in_the_web_app() {
+    i18n::set_language(i18n::Language::German);
+    let ctx = egui::Context::default();
+    let mut app = startup(Session::new(2), None);
+    app.execute(Pending::Analyze(2));
+    let output = open_picker(&mut app, &ctx, 1, 6);
+    let shown = texts(&output);
+    i18n::set_language(i18n::Language::English);
+    for label in [
+        "Player 2 · Dreierpasch",
+        "Offen",
+        "Streichen (0)",
+        "Abbrechen",
+    ] {
+        assert!(
+            shown.contains(&label.to_string()),
+            "{label} missing in {shown:?}"
+        );
     }
 }

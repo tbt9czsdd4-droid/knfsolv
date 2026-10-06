@@ -22,5 +22,7 @@ if ! { [ -f "$cert" ] && openssl x509 -in "$cert" -noout -checkip "$ip" >/dev/nu
         -keyout "$key" -out "$cert" 2>/dev/null
 fi
 echo "On the phone, open https://$ip:8443"
+# Rebuild on changes to the engine and interface too, not only to this folder.
 exec trunk serve --release --address 0.0.0.0 --port 8443 \
-    --tls-key-path "$key" --tls-cert-path "$cert"
+    --tls-key-path "$key" --tls-cert-path "$cert" \
+    --watch . --watch ../src --watch ../data --watch ../Cargo.toml

@@ -23,6 +23,7 @@ use std::{
 use web_time::Instant;
 
 pub mod i18n;
+mod picker;
 
 enum Pending {
     Local(LocalGameConfig),
@@ -63,7 +64,8 @@ pub struct Desktop {
     path: String,
     current_path: PathBuf,
     message: String,
-    edit: Option<(usize, usize, String)>,
+    /// The sheet cell (player, category) whose score picker is open.
+    edit: Option<(usize, usize)>,
     score_wheel: ScoreWheel,
     score_wheel_limits: ScoreWheelLimits,
     show_settings: bool,
@@ -1152,7 +1154,7 @@ impl Desktop {
         ui.set_width(ui.available_width());
         ui.heading("Score sheets");
         ui.small(if self.game.position_editor() {
-            "Hover and scroll to change a score; click to type. Empty = open; 0 = crossed out. Filled entries determine the next player."
+            "Click a score to pick its value, or hover and scroll. Open = unfilled; 0 = crossed out. Filled entries determine the next player."
         } else if self.game.editing() {
             "Edit mode: click any entry. Empty = open; 0 = crossed out. Turns are paused."
         } else {
@@ -1186,10 +1188,10 @@ impl Desktop {
                                 wheel_cell = Some((player, category));
                             }
                             let response = if self.game.position_editor() {
-                                response.on_hover_text("Scroll up/down through legal scores. Open = unfilled; 0 = crossed out. Click to enter manually. Wheel limits: Settings → Game.")
+                                response.on_hover_text("Scroll up/down through legal scores, or click to pick one. Open = unfilled; 0 = crossed out. Wheel limits: Settings → Game.")
                             } else { response };
                             if response.clicked() {
-                                self.edit = Some((player, category, value.map(|v| v.to_string()).unwrap_or_default()));
+                                self.edit = Some((player, category));
                             }
                         } else if let Some(value) = value {
                             ui.label(value.to_string());
@@ -1816,50 +1818,7 @@ impl Desktop {
     }
 
     fn dialogs(&mut self, ctx: &egui::Context) {
-        if let Some((player, category, mut text)) = self.edit.clone() {
-            egui::Window::new("Edit sheet entry")
-                .collapsible(false)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.label(format!(
-                        "{} · {}",
-                        self.game.session().position.players[player].name,
-                        rules::NAMES[category]
-                    ));
-                    ui.label(if self.game.position_editor() {
-                        "Empty = open. 0 = crossed out. Filled entries determine the next player."
-                    } else {
-                        "Empty = open. 0 = crossed out. Editing does not advance the turn."
-                    });
-                    ui.text_edit_singleline(&mut text);
-                    self.edit = Some((player, category, text.clone()));
-                    ui.horizontal(|ui| {
-                        if ui.button("Apply edit").clicked() {
-                            let result = (|| {
-                                let value = if text.trim().is_empty() {
-                                    None
-                                } else {
-                                    Some(text.trim().parse::<u16>().map_err(|_| {
-                                        Error::Invalid(
-                                            "Enter a nonnegative score or leave empty".into(),
-                                        )
-                                    })?)
-                                };
-                                let mut next = self.game.session().clone();
-                                next.position.players[player].sheet.cells[category] = value;
-                                next.position.players[player].sheet.validate()?;
-                                self.commit(next);
-                                self.edit = None;
-                                Ok(())
-                            })();
-                            self.outcome(result);
-                        }
-                        if ui.button("Cancel").clicked() {
-                            self.edit = None;
-                        }
-                    });
-                });
-        }
+        self.picker_ui(ctx);
         if self.pending.is_some() && self.browser.is_some() {
             egui::Window::new(t("Replace position"))
                 .collapsible(false)

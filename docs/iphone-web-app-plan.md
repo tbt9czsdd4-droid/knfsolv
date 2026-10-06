@@ -1,6 +1,6 @@
 # iPhone web app plan
 
-Status: Phases 0–3 done (2026-10-05; Pages deployment postponed); Phase 4 in progress (step 1 of 7 done). This replaces the earlier draft (commit `edcef33`).
+Status: Phases 0–3 done (2026-10-05; Pages deployment postponed); Phase 4 in progress (step 2 of 7 done). This replaces the earlier draft (commit `edcef33`).
 Sources: [the brainstorm](iphone-web-app-brainstorm.md), code inspection, and measurements taken on 2026-10-04 (section 3).
 
 ## 1. Goal
@@ -415,7 +415,7 @@ Estimates are focused working days. Each phase ends with something testable on t
 
 **Status (2026-10-05): in progress, in seven steps, each committed as "Phase 4.N" and reported before the next one starts.**
 1. Done: `src/gui/` split (`mod.rs`, `tests.rs`) and the translation layer `gui::i18n` (`t`, `tf`, per-thread language, a test for missing or unused German entries). The web app starts in German; the Phase 3 browser texts are translated.
-2. Score picker (desktop and phone), replacing the typing dialog.
+2. Done: score picker (`src/gui/picker.rs`) on desktop and phone, replacing the typing dialog. It offers exactly `rules::category_scores` (nonzero values in a 44-point grid of six columns that fits 310 points), *Offen*, *Streichen (0)*, and the current roll's points for the rolling player; one tap applies, Undo reverts, the mouse wheel stays. `serve-lan.sh` now also rebuilds on changes to the main crate.
 3. Controller features: „Übernehmen“; keeping entered dice when an edit does not change who is rolling; expected-score objective for one player; phone analysis defaults with „Länger rechnen“.
 4. Phone analyzer layout below 600 points: top bar with ☰ menu, dice panel with Wurf selector, advice card, compact sheet with sideways scrolling.
 5. Player sheet (name, Zusatz-Kniffel, order) and the „Wer ist dran?“ fallback.

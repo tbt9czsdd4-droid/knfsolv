@@ -41,6 +41,29 @@ pub fn tf(english: &'static str, values: &[(&str, &dyn Display)]) -> String {
         })
 }
 
+/// The name of score category `category` (0 = Ones … 12 = Chance), as on the paper sheet.
+pub fn category_name(category: usize) -> &'static str {
+    const GERMAN_CATEGORIES: [&str; 13] = [
+        "Einser",
+        "Zweier",
+        "Dreier",
+        "Vierer",
+        "Fünfer",
+        "Sechser",
+        "Dreierpasch",
+        "Viererpasch",
+        "Full House",
+        "Kleine Straße",
+        "Große Straße",
+        "Kniffel",
+        "Chance",
+    ];
+    match language() {
+        Language::English => crate::rules::NAMES[category],
+        Language::German => GERMAN_CATEGORIES[category],
+    }
+}
+
 fn german(english: &str) -> Option<&'static str> {
     static TABLE: OnceLock<HashMap<&str, &str>> = OnceLock::new();
     TABLE
@@ -66,6 +89,14 @@ const GERMAN: &[(&str, &str)] = &[
     ),
     ("Discard", "Verwerfen"),
     ("Go back", "Zurück"),
+    // Score picker.
+    (
+        "{points} with the current roll",
+        "{points} mit aktuellem Wurf",
+    ),
+    ("Open", "Offen"),
+    ("Cross out (0)", "Streichen (0)"),
+    ("Cancel", "Abbrechen"),
 ];
 
 #[cfg(test)]
