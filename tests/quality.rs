@@ -341,3 +341,186 @@ fn desktop_difficulty_ordering() {
         );
     }
 }
+
+/// Which move a hero takes from one coaching report.
+#[derive(Clone, Copy, Debug)]
+enum AdviceMode {
+    /// The default: the baseline move unless the sampled leader's gain is resolved.
+    Conservative,
+    /// The paired sampled leader (`advice sampled`).
+    SampledLeader,
+    /// The move with the highest displayed objective value (win chance), then expected score.
+    HighestShown,
+}
+
+fn advised(report: &solver::Report, mode: AdviceMode) -> knfsolv::rules::Action {
+    let best = report.best_action.unwrap();
+    match mode {
+        AdviceMode::Conservative => best,
+        AdviceMode::SampledLeader
+            if report.recommendation_basis == "baseline_uncertain_advantage" =>
+        {
+            report.sampled_best_action.unwrap()
+        }
+        AdviceMode::SampledLeader => best,
+        // Exact answers and small-sample fallbacks are the same in every mode.
+        AdviceMode::HighestShown
+            if report.status != "estimated"
+                || !matches!(
+                    report.recommendation_basis.as_str(),
+                    "sampled_best" | "baseline_uncertain_advantage"
+                ) =>
+        {
+            best
+        }
+        AdviceMode::HighestShown => report
+            .alternatives
+            .iter()
+            .filter_map(|a| a.metrics.map(|m| (a.action, m)))
+            .max_by(|(_, a), (_, b)| {
+                a.utility
+                    .total_cmp(&b.utility)
+                    .then(a.expected_score.total_cmp(&b.expected_score))
+            })
+            .map_or(best, |(action, _)| action),
+    }
+}
+
+/// One game: the hero follows coaching advice in `mode`; everyone else plays the bundled
+/// continuation-v2 baseline. Dice depend only on (game, player, turn, roll), so the modes
+/// see the same luck. Returns the hero's final score and shared-first credit.
+fn advice_game(players: usize, game: usize, samples: u64, mode: AdviceMode) -> (f64, f64) {
+    use knfsolv::solver::{AnalysisSession, WorkSlice};
+    let hero = game % players;
+    let mut p = Position::new(players);
+    let mut decision = 0;
+    while !matches!(p.phase, Phase::Finished) {
+        match p.phase {
+            Phase::BeforeFirstRoll | Phase::AwaitingRoll { .. } => {
+                let (mut faces, rerolls) = match p.phase {
+                    Phase::AwaitingRoll {
+                        kept,
+                        rerolls_after,
+                    } => (kept.faces(), rerolls_after),
+                    _ => (vec![], 2),
+                };
+                let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(700000 + game as u64);
+                rng.set_stream(
+                    p.active_player as u64 * 64
+                        + (13 - p.players[p.active_player].sheet.open()) as u64 * 4
+                        + (2 - rerolls) as u64,
+                );
+                while faces.len() < 5 {
+                    faces.push(rng.gen_range(1..=6));
+                }
+                p.enter_roll(Dice::from_faces(&faces).unwrap()).unwrap();
+            }
+            Phase::Decision { dice, rerolls_left } => {
+                let action = if p.active_player == hero {
+                    // As the app's coaching runs it: Auto, exact attempt in small endgames,
+                    // otherwise fixed-policy rollouts, with a sample budget instead of time.
+                    let settings = Settings {
+                        perspective: hero,
+                        method: Method::Auto,
+                        policy: Policy::Opportunity,
+                        time_ms: 0,
+                        simulations: samples,
+                        seed: game as u64 * 1000 + decision,
+                        conservative_advice: true,
+                        ..Settings::default()
+                    };
+                    decision += 1;
+                    let mut session = AnalysisSession::new(p.clone(), settings).unwrap();
+                    session.set_continuous(false);
+                    while !session.finished() {
+                        session.advance(WorkSlice::samples(samples));
+                    }
+                    advised(&session.snapshot(), mode)
+                } else {
+                    policy::choose(
+                        &p.players[p.active_player].sheet,
+                        dice,
+                        rerolls_left,
+                        Policy::Opportunity,
+                    )
+                };
+                p.apply(action).unwrap();
+            }
+            Phase::Finished => unreachable!(),
+        }
+    }
+    let metrics = solver::terminal(
+        &p,
+        &Settings {
+            perspective: hero,
+            ..Settings::default()
+        },
+    );
+    (metrics.expected_score, metrics.utility)
+}
+
+/// Should coaching follow uncertain sampled leaders? Plays every game once per advice mode
+/// on the same dice and reports paired differences. KNFSOLV_ADVICE_GAMES (150),
+/// KNFSOLV_ADVICE_PLAYERS (2), KNFSOLV_ADVICE_SAMPLES (5000, about 3 s on a phone).
+#[test]
+#[ignore = "release-build comparison of advice modes; tens of minutes"]
+fn compare_advice_modes_in_full_games() {
+    let var = |name: &str, default: u64| {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default)
+    };
+    let games = var("KNFSOLV_ADVICE_GAMES", 150) as usize;
+    let players = var("KNFSOLV_ADVICE_PLAYERS", 2) as usize;
+    let samples = var("KNFSOLV_ADVICE_SAMPLES", 5000);
+    let modes = [
+        AdviceMode::Conservative,
+        AdviceMode::SampledLeader,
+        AdviceMode::HighestShown,
+    ];
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let results = std::sync::Mutex::new(Vec::new());
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    std::thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| {
+                loop {
+                    let game = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if game >= games {
+                        break;
+                    }
+                    let outcome = modes.map(|mode| advice_game(players, game, samples, mode));
+                    eprintln!("game {game}: {outcome:?}");
+                    results.lock().unwrap().push(outcome);
+                }
+            });
+        }
+    });
+    let results = results.into_inner().unwrap();
+    let n = results.len() as f64;
+    let mean = |f: &dyn Fn(&[(f64, f64); 3]) -> f64| results.iter().map(f).sum::<f64>() / n;
+    let paired = |f: &dyn Fn(&[(f64, f64); 3]) -> f64| {
+        let m = mean(f);
+        let var = results.iter().map(|r| (f(r) - m).powi(2)).sum::<f64>() / (n - 1.0);
+        (m, 1.96 * (var / n).sqrt())
+    };
+    println!(
+        "{players} players, {games} games, {samples} samples per decision, rotated hero seat:"
+    );
+    for (i, mode) in modes.iter().enumerate() {
+        println!(
+            "  {mode:?}: mean score {:.2}, shared-first credit {:.3}",
+            mean(&|r| r[i].0),
+            mean(&|r| r[i].1)
+        );
+    }
+    for (a, b) in [(1, 0), (2, 0), (2, 1)] {
+        let (score, score_ci) = paired(&|r| r[a].0 - r[b].0);
+        let (credit, credit_ci) = paired(&|r| r[a].1 - r[b].1);
+        println!(
+            "  {:?} minus {:?}: score {score:+.2} ± {score_ci:.2}, credit {credit:+.3} ± {credit_ci:.3}",
+            modes[a], modes[b]
+        );
+    }
+}

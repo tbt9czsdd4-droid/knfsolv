@@ -1,6 +1,22 @@
 # Verification results
 
 
+## October 6: advice modes in full games
+
+Should coaching recommend the move with the highest displayed win chance instead of the conservative baseline? `compare_advice_modes_in_full_games` in `tests/quality.rs` plays each game once per advice mode with the same dice for every player, turn, and roll. The analyzed player follows coaching exactly as the app runs it (`AnalysisSession`, Auto: a bounded exact attempt in small endgames, otherwise fixed-policy rollouts) with 5,000 games per decision, about the phone's three seconds. The other player uses the bundled continuation-v2 baseline; the analyzed seat rotates. All three modes read the same report, which has identical alternatives in both advice settings.
+
+Two players, 300 games (±: approximate 95% interval of the paired difference):
+
+| Advice mode | Mean score | Shared-first credit | Difference from conservative |
+| --- | ---: | ---: | --- |
+| Conservative (default) | 227.64 | .442 | — |
+| Paired sampled leader (`advice sampled`) | 212.73 | .397 | score −14.91 ± 5.57, credit −.045 ± .053 |
+| Highest displayed objective value | 173.67 | .205 | score −53.97 ± 6.00, credit −.237 ± .059 |
+
+Following the highest displayed estimate is much worse: with 20–30 candidate moves and a few hundred games each, the maximum of noisy raw estimates is often a lucky, rarely sampled move. The paired leader is also worse at this budget. The conservative default stays. Reproduce with `KNFSOLV_ADVICE_GAMES=300 cargo test --release --test quality compare_advice_modes -- --ignored --nocapture` (about 20 minutes on 16 threads; `KNFSOLV_ADVICE_PLAYERS` and `KNFSOLV_ADVICE_SAMPLES` change the setup).
+
+The example that prompted this, `2 2 3 4 5` on an empty two-player sheet: the baseline keeps `2 2` with two rerolls left and `2 3 4 5` with one. With two rerolls left and 100,000 rollouts, keeping `2 3 4 5` leads by a paired +.029 shared-first utility, but its conservative interval [−.027, +.086] still includes zero, so the baseline remains the advice. The conservative rule is strict enough that it rarely departs from the baseline within a phone's budget, even where the baseline is weak.
+
 ## September 13 persistent preferences and engine controls
 
 The routine suite passes **113 tests** with GUI support and **77** without it.
