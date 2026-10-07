@@ -340,6 +340,54 @@ fn touch_field_margin(ui: &egui::Ui) -> egui::Vec2 {
     let row = ui.fonts_mut(|f| f.row_height(&font));
     egui::vec2(8.0, ((44.0 - row) / 2.0).max(4.0))
 }
+/// A labeled setting: one wrapping line on larger screens, the label above on the phone.
+fn setting(ui: &mut egui::Ui, phone: bool, label: &str, add: impl FnOnce(&mut egui::Ui)) {
+    if phone {
+        ui.label(label);
+        ui.horizontal_wrapped(add);
+    } else {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(label);
+            add(ui);
+        });
+    }
+}
+/// One of `options`: on the phone a button each, sized by the page's `interact_size`; on larger
+/// screens a combo box when `combo` names one, otherwise selectable labels.
+fn pick<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    phone: bool,
+    combo: Option<impl std::hash::Hash>,
+    value: &mut T,
+    options: &[(T, &str)],
+) {
+    match combo {
+        Some(id) if !phone => {
+            let selected = options
+                .iter()
+                .find(|(o, _)| o == value)
+                .map_or("", |(_, l)| *l);
+            egui::ComboBox::from_id_salt(id)
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    for &(option, label) in options {
+                        ui.selectable_value(value, option, label);
+                    }
+                });
+        }
+        _ => {
+            for &(option, label) in options {
+                let mut button = egui::Button::new(label).selected(*value == option);
+                if phone {
+                    button = button.min_size(ui.spacing().interact_size);
+                }
+                if ui.add(button).clicked() {
+                    *value = option;
+                }
+            }
+        }
+    }
+}
 /// The difficulty name of a computer preset.
 fn policy_label(policy: ComputerPolicy) -> &'static str {
     match policy {
@@ -747,7 +795,7 @@ impl Desktop {
             self.game.play(action, Instant::now())?;
         }
         self.refresh_revision();
-        self.message = "Move applied.".into();
+        self.message = t("Move applied.").into();
         Ok(())
     }
     fn choose_face(&mut self, face: u8, now: Instant) {
@@ -830,7 +878,7 @@ impl Desktop {
             Pending::Close => self.allow_close = true,
             Pending::Local(config) => {
                 if let Err(e) = self.game.start_local(&config, rand::random()) {
-                    self.message = e.to_string();
+                    self.message = i18n::error_text(&e);
                     return;
                 }
                 self.refresh_revision();
@@ -843,7 +891,7 @@ impl Desktop {
                     .session(rand::random())
                     .and_then(|session| self.game.replace_session(session));
                 if let Err(e) = result {
-                    self.message = e.to_string();
+                    self.message = i18n::error_text(&e);
                     return;
                 }
                 self.refresh_revision();
@@ -859,7 +907,7 @@ impl Desktop {
                 session.position.active_player = current.turn_order[0];
                 session.settings.perspective = current.turn_order[0];
                 if let Err(e) = self.game.replace_session(session) {
-                    self.message = e.to_string();
+                    self.message = i18n::error_text(&e);
                     return;
                 }
                 self.refresh_revision();
@@ -879,17 +927,17 @@ impl Desktop {
                     self.current_path = path;
                     self.opened(format!("Loaded {}", self.path));
                 }
-                Err(e) => self.message = e.to_string(),
+                Err(e) => self.message = i18n::error_text(&e),
             },
             Pending::Open(session) => match self.game.replace_session(*session) {
                 Ok(()) => self.opened(t("Opened the position.").into()),
-                Err(e) => self.message = e.to_string(),
+                Err(e) => self.message = i18n::error_text(&e),
             },
         }
     }
     fn start_editor(&mut self, session: Session) {
         if let Err(e) = self.game.replace_session(session) {
-            self.message = e.to_string();
+            self.message = i18n::error_text(&e);
             return;
         }
         self.refresh_revision();
@@ -935,7 +983,7 @@ impl Desktop {
     fn analyze(&mut self, _ctx: &egui::Context) -> Result<()> {
         if !self.analysis_eligible() {
             return Err(Error::Invalid(
-                "Correct the position and complete or discard partial dice entry before analysis."
+                t("Correct the position and complete or discard partial dice entry before analysis.")
                     .into(),
             ));
         }
@@ -1022,7 +1070,7 @@ impl Desktop {
                     self.report = Some(report);
                 }
                 Err(error) => {
-                    self.message = error;
+                    self.message = i18n::error_text(&error);
                 }
             }
         }
@@ -1076,9 +1124,9 @@ impl Desktop {
         self.computer_requested = Some(key);
         self.computer_fallback = fallback;
         self.computer_status = if fallback {
-            "Choosing the declared baseline after a search failure…"
+            t("Choosing the declared baseline after a search failure…")
         } else {
-            "Thinking…"
+            t("Thinking…")
         }
         .into();
         Ok(())
@@ -1094,7 +1142,10 @@ impl Desktop {
         }
         if !update.finished {
             if let Ok(report) = update.report {
-                self.computer_status = format!("Thinking… {} completed games", report.samples);
+                self.computer_status = tf(
+                    "Thinking… {count} completed games",
+                    &[("count", &i18n::count(report.samples))],
+                );
             }
             return;
         }
@@ -1103,8 +1154,12 @@ impl Desktop {
             report
                 .best_action
                 .map(|action| (action, report.selection_reason))
-                .ok_or_else(|| "The search budget ended without advice.".into())
+                .ok_or_else(|| t("The search budget ended without advice.").into())
         });
+        let title = decision
+            .as_ref()
+            .ok()
+            .map(|(action, _)| self.move_title(*action));
         let reason = match decision {
             Ok((action, explanation)) => {
                 match self
@@ -1112,23 +1167,32 @@ impl Desktop {
                     .accept_computer_decision(update.key.token, action, now)
                 {
                     Ok(true) => {
-                        self.computer_status = format!("{action}. {explanation}");
+                        // The engine's explanation is English; it stays out of the German interface.
+                        let title = title.unwrap_or_default();
+                        self.computer_status = match i18n::language() {
+                            i18n::Language::English => format!("{title}. {explanation}"),
+                            i18n::Language::German => title,
+                        };
                         return;
                     }
                     Ok(false) => return, // Cancellation/revision changes never create fallback moves.
-                    Err(e) => e.to_string(),
+                    Err(e) => i18n::error_text(&e),
                 }
             }
-            Err(e) => e,
+            Err(e) => i18n::error_text(&e),
         };
         if self.computer_fallback {
-            self.computer_notice =
-                format!("Computer paused: its legal baseline could not be obtained. {reason}");
+            self.computer_notice = tf(
+                "Computer paused: its legal baseline could not be obtained. {reason}",
+                &[("reason", &reason)],
+            );
             self.game.set_computer_paused(true);
             self.refresh_revision();
         } else {
-            self.computer_notice =
-                format!("Computer search fallback: {reason} Using the declared legal baseline.");
+            self.computer_notice = tf(
+                "Computer search fallback: {reason} Using the declared legal baseline.",
+                &[("reason", &reason)],
+            );
             let result = self.request_computer(true);
             self.outcome(result);
         }
@@ -1151,27 +1215,31 @@ impl Desktop {
                     let actor = self.game.session().position.players[job.token.actor]
                         .name
                         .clone();
+                    // Titles describe a move against the dice before it is played.
+                    let title = match job.step {
+                        AutomaticStep::Apply(action) => self.move_title(action),
+                        _ => String::new(),
+                    };
                     match self.game.execute_automatic(job, now) {
                         Ok(true) => {
                             self.refresh_revision();
                             self.message = match job.step {
-                                AutomaticStep::Roll => format!(
-                                    "{actor} rolled {}.",
-                                    self.game
-                                        .dice()
-                                        .faces
-                                        .iter()
-                                        .map(u8::to_string)
-                                        .collect::<Vec<_>>()
-                                        .join(" ")
-                                ),
-                                AutomaticStep::Apply(action) => format!("{actor}: {action}."),
+                                AutomaticStep::Roll => {
+                                    let faces = self.game.dice().faces.map(|f| f.to_string());
+                                    tf(
+                                        "{name} rolled {dice}.",
+                                        &[("name", &actor), ("dice", &faces.join(" "))],
+                                    )
+                                }
+                                AutomaticStep::Apply(_) => {
+                                    tf("{name}: {move}.", &[("name", &actor), ("move", &title)])
+                                }
                                 _ => unreachable!(),
                             };
                         }
                         Ok(false) => (),
                         Err(e) => {
-                            self.message = e.to_string();
+                            self.message = i18n::error_text(&e);
                             self.game.set_computer_paused(true);
                             self.refresh_revision();
                         }
@@ -1184,7 +1252,7 @@ impl Desktop {
     }
     fn outcome(&mut self, result: Result<()>) {
         if let Err(e) = result {
-            self.message = e.to_string();
+            self.message = i18n::error_text(&e);
         }
     }
     fn suggested_keeps(&self) -> [bool; 5] {
@@ -1362,7 +1430,7 @@ impl Desktop {
                             let points = rules::score(&p.sheet, dice, category);
                             let hint = matches!(suggested, Some(Action::Write { category: c } | Action::CrossOut { category: c }) if c == category);
                             let computer_choice = matches!(self.game.pending_computer_action(), Some(Action::Write { category: c } | Action::CrossOut { category: c }) if c == category);
-                            let label = if computer_choice { format!("{points} ← Computer") } else if ready { format!("{points}{}", if hint { " ★" } else { "" }) } else if self.game.control() == PlayerControl::Computer { points.to_string() } else { "…".into() };
+                            let label = if computer_choice { format!("{points} ⬅ Computer") } else if ready { format!("{points}{}", if hint { " ★" } else { "" }) } else if self.game.control() == PlayerControl::Computer { points.to_string() } else { "…".into() };
                             if ui.add_enabled(ready, egui::Button::new(label).min_size(egui::vec2(76.0, 26.0)))
                                 .on_hover_text(if rules::extra_eligible(&p.sheet, dice) { t("Score and advance; also awards 50 extra Kniffel points.") } else { t("Score and advance to the next player.") }).clicked()
                             {
@@ -1408,201 +1476,227 @@ impl Desktop {
             self.outcome(result);
         }
     }
-    fn settings_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Settings");
-        {
-            let mut next = self.game.session().clone();
-            if !self.engine_tab {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Score wheel limits (global editor preference)");
-                    egui::ComboBox::from_id_salt("score_wheel_limits")
-                        .selected_text(match self.score_wheel_limits {
-                            ScoreWheelLimits::StopAtEnds => "Stop at ends",
-                            ScoreWheelLimits::WrapAround => "Wrap around",
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.score_wheel_limits,
-                                ScoreWheelLimits::StopAtEnds,
-                                "Stop at ends",
-                            );
-                            ui.selectable_value(
-                                &mut self.score_wheel_limits,
-                                ScoreWheelLimits::WrapAround,
-                                "Wrap around",
-                            );
-                        });
-                });
-                if let Some(desktop) = &mut next.desktop {
-                    ui.horizontal(|ui| {
-                        ui.label("Human dice");
-                        ui.selectable_value(
-                            &mut desktop.dice_source,
-                            DiceSource::Physical,
-                            "Physical",
+    /// The settings, in a window on larger screens and as the phone's „Erweitert“ page. On the
+    /// phone, choices are rows of buttons and every control is 44 points tall (the page sets
+    /// `interact_size`); mouse-wheel and file-path settings are left out where they cannot apply.
+    fn settings_ui(&mut self, ui: &mut egui::Ui, phone: bool) {
+        ui.horizontal_wrapped(|ui| {
+            pick(
+                ui,
+                phone,
+                None::<()>,
+                &mut self.engine_tab,
+                &[(true, t("Engine")), (false, t("Game"))],
+            );
+        });
+        ui.separator();
+        let field_margin = if phone {
+            touch_field_margin(ui)
+        } else {
+            egui::vec2(4.0, 2.0)
+        };
+        let mut next = self.game.session().clone();
+        if !self.engine_tab {
+            let mut editing = self.game.editing();
+            if ui
+                .checkbox(
+                    &mut editing,
+                    t("Edit position (enable historical and player editing)"),
+                )
+                .changed()
+            {
+                self.game.set_editing(editing);
+                self.refresh_revision();
+                next = self.game.session().clone();
+            }
+            if !phone {
+                setting(
+                    ui,
+                    phone,
+                    t("Score wheel limits (global editor preference)"),
+                    |ui| {
+                        pick(
+                            ui,
+                            phone,
+                            Some("score_wheel_limits"),
+                            &mut self.score_wheel_limits,
+                            &[
+                                (ScoreWheelLimits::StopAtEnds, t("Stop at ends")),
+                                (ScoreWheelLimits::WrapAround, t("Wrap around")),
+                            ],
                         );
-                        ui.selectable_value(
-                            &mut desktop.dice_source,
-                            DiceSource::Digital,
-                            "Digital",
+                    },
+                );
+            }
+            if let Some(desktop) = &mut next.desktop {
+                setting(ui, phone, t("Human dice"), |ui| {
+                    pick(
+                        ui,
+                        phone,
+                        None::<()>,
+                        &mut desktop.dice_source,
+                        &[
+                            (DiceSource::Physical, t("Physical")),
+                            (DiceSource::Digital, t("Digital")),
+                        ],
+                    );
+                });
+            }
+            let names: Vec<String> = next
+                .position
+                .players
+                .iter()
+                .map(|p| p.name.clone())
+                .collect();
+            let players: Vec<(usize, &str)> =
+                names.iter().map(String::as_str).enumerate().collect();
+            ui.add_enabled_ui(self.game.editing(), |ui| {
+                let roller = !self.game.position_editor() || next.position.hypothetical;
+                setting(ui, phone, t("Active player"), |ui| {
+                    ui.add_enabled_ui(roller, |ui| {
+                        pick(
+                            ui,
+                            phone,
+                            Some("active"),
+                            &mut next.position.active_player,
+                            &players,
+                        );
+                    });
+                });
+                setting(ui, phone, t("Advice for"), |ui| {
+                    ui.add_enabled_ui(roller, |ui| {
+                        pick(
+                            ui,
+                            phone,
+                            Some("perspective"),
+                            &mut next.settings.perspective,
+                            &players,
+                        );
+                    });
+                });
+                ui.checkbox(&mut next.position.hypothetical, t("Hypothetical position"));
+                setting(ui, phone, t("Phase"), |ui| {
+                    if ui.button(t("Before first roll")).clicked() {
+                        next.position.phase = Phase::BeforeFirstRoll;
+                    }
+                    if ui.button(t("Finished")).clicked() {
+                        next.position.phase = Phase::Finished;
+                    }
+                    if let Phase::Decision { rerolls_left, .. } = &mut next.position.phase {
+                        ui.label(t("Rerolls left"));
+                        ui.add(egui::DragValue::new(rerolls_left).range(0..=2));
+                    }
+                });
+                for i in 0..next.position.players.len() {
+                    setting(ui, phone, &start::player_number(i), |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut next.position.players[i].name)
+                                .id_salt(("settings_name", i))
+                                .margin(field_margin)
+                                .desired_width(140.0),
+                        );
+                        ui.label(t("Extra Kniffels (count)"));
+                        ui.add(
+                            egui::DragValue::new(
+                                &mut next.position.players[i].sheet.extra_kniffels,
+                            )
+                            .range(0..=255),
                         );
                     });
                 }
-                ui.add_enabled_ui(self.game.editing(), |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.add_enabled_ui(
-                            !self.game.position_editor() || next.position.hypothetical,
-                            |ui| {
-                                ui.label("Active player");
-                                egui::ComboBox::from_id_salt("active")
-                                    .selected_text(
-                                        &next.position.players[next.position.active_player].name,
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for (i, p) in next.position.players.iter().enumerate() {
-                                            ui.selectable_value(
-                                                &mut next.position.active_player,
-                                                i,
-                                                &p.name,
-                                            );
-                                        }
-                                    });
-                                ui.label("Advice for");
-                                egui::ComboBox::from_id_salt("perspective")
-                                    .selected_text(
-                                        &next.position.players[next.settings.perspective].name,
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for (i, p) in next.position.players.iter().enumerate() {
-                                            ui.selectable_value(
-                                                &mut next.settings.perspective,
-                                                i,
-                                                &p.name,
-                                            );
-                                        }
-                                    });
-                            },
-                        );
-                        ui.checkbox(&mut next.position.hypothetical, "Hypothetical position");
-                    });
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Phase");
-                        if ui.button("Before first roll").clicked() {
-                            next.position.phase = Phase::BeforeFirstRoll;
+                setting(ui, phone, t("Turn order (move players left):"), |ui| {
+                    for rank in 0..next.position.turn_order.len() {
+                        let player = next.position.turn_order[rank];
+                        // "←" is missing from egui's fonts; "⬅" is in its emoji font.
+                        let label = format!("⬅ {}", next.position.players[player].name);
+                        if ui.add_enabled(rank > 0, egui::Button::new(label)).clicked() {
+                            next.position.turn_order.swap(rank - 1, rank);
                         }
-                        if ui.button("Finished").clicked() {
-                            next.position.phase = Phase::Finished;
-                        }
-                        if let Phase::Decision { rerolls_left, .. } = &mut next.position.phase {
-                            ui.label("Rerolls left");
-                            ui.add(egui::DragValue::new(rerolls_left).range(0..=2));
-                        }
-                    });
-                    for i in 0..next.position.players.len() {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("Player {}", i + 1));
-                            ui.add(
-                                egui::TextEdit::singleline(&mut next.position.players[i].name)
-                                    .desired_width(140.0),
-                            );
-                            ui.label("Extra Kniffels (count)");
-                            ui.add(
-                                egui::DragValue::new(
-                                    &mut next.position.players[i].sheet.extra_kniffels,
-                                )
-                                .range(0..=255),
-                            );
-                        });
-                    }
-                    ui.label("Turn order (move players left):");
-                    ui.horizontal_wrapped(|ui| {
-                        for rank in 0..next.position.turn_order.len() {
-                            let player = next.position.turn_order[rank];
-                            if ui
-                                .add_enabled(
-                                    rank > 0,
-                                    egui::Button::new(format!(
-                                        "← {}",
-                                        next.position.players[player].name
-                                    )),
-                                )
-                                .clicked()
-                            {
-                                next.position.turn_order.swap(rank - 1, rank);
-                            }
-                        }
-                    });
-                });
-                self.commit(next);
-                return;
-            }
-            for i in 0..next.position.players.len() {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(format!("Seat {} model default", i + 1));
-                    let mut model = next.settings.model(i);
-                    egui::ComboBox::from_id_salt(("model", i))
-                        .selected_text(model.name())
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut model, Policy::Opportunity, "Opportunity");
-                            ui.selectable_value(&mut model, Policy::Greedy, "Greedy");
-                            ui.selectable_value(
-                                &mut model,
-                                Policy::LegacyOpportunity,
-                                "Legacy opportunity",
-                            );
-                        });
-                    if model != next.settings.model(i) {
-                        if next.settings.opponent_policies.is_empty() {
-                            next.settings.opponent_policies =
-                                vec![next.settings.policy; next.position.players.len()];
-                        }
-                        next.settings.opponent_policies[i] = model;
                     }
                 });
-            }
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Objective");
-                egui::ComboBox::from_id_salt("objective")
-                    .selected_text(format!("{:?}", next.settings.objective))
-                    .show_ui(ui, |ui| {
-                        for (o, label) in [
-                            (Objective::SharedFirst, "Shared first (split ties)"),
-                            (Objective::StrictFirst, "Outright first"),
-                            (Objective::ExpectedScore, "Expected score"),
-                        ] {
-                            ui.selectable_value(&mut next.settings.objective, o, label);
-                        }
-                    });
-                ui.label("Method");
-                egui::ComboBox::from_id_salt("method")
-                    .selected_text(format!("{:?}", next.settings.method))
-                    .show_ui(ui, |ui| {
-                        for m in [Method::Auto, Method::Exact, Method::Rollout, Method::Mcts] {
-                            ui.selectable_value(&mut next.settings.method, m, format!("{m:?}"));
-                        }
-                    });
             });
-            egui::Grid::new("budgets").show(ui, |ui| {
-                ui.label("Time limit (ms; 0 unlimited)");
-                ui.add(egui::DragValue::new(&mut next.settings.time_ms));
-                ui.end_row();
-                ui.label("Simulations");
-                ui.add(egui::DragValue::new(&mut next.settings.simulations).range(1..=u64::MAX));
-                ui.end_row();
-                ui.label("Search nodes");
-                ui.add(egui::DragValue::new(&mut next.settings.max_nodes).range(1..=usize::MAX));
-                ui.end_row();
-                ui.label("MCTS depth limit (0 unlimited)");
-                ui.add(egui::DragValue::new(&mut next.settings.max_depth));
-                ui.end_row();
-                ui.label("Random seed");
-                ui.add(egui::DragValue::new(&mut next.settings.seed));
-                ui.end_row();
-            });
-            ui.checkbox(
-                &mut next.settings.conservative_advice,
-                "Conservative advice: retain baseline unless improvement is established",
+            self.commit(next);
+            return;
+        }
+        for i in 0..next.position.players.len() {
+            let mut model = next.settings.model(i);
+            setting(
+                ui,
+                phone,
+                &tf("Seat {number} model default", &[("number", &(i + 1))]),
+                |ui| {
+                    pick(
+                        ui,
+                        phone,
+                        Some(egui::Id::new(("model", i))),
+                        &mut model,
+                        &[
+                            (Policy::Opportunity, t("Opportunity")),
+                            (Policy::Greedy, t("Greedy")),
+                            (Policy::LegacyOpportunity, t("Legacy opportunity")),
+                        ],
+                    );
+                },
             );
+            if model != next.settings.model(i) {
+                if next.settings.opponent_policies.is_empty() {
+                    next.settings.opponent_policies =
+                        vec![next.settings.policy; next.position.players.len()];
+                }
+                next.settings.opponent_policies[i] = model;
+            }
+        }
+        setting(ui, phone, t("Objective"), |ui| {
+            pick(
+                ui,
+                phone,
+                Some("objective"),
+                &mut next.settings.objective,
+                &[
+                    (Objective::SharedFirst, t("Shared first (split ties)")),
+                    (Objective::StrictFirst, t("Outright first")),
+                    (Objective::ExpectedScore, t("Expected score")),
+                ],
+            );
+        });
+        setting(ui, phone, t("Method"), |ui| {
+            pick(
+                ui,
+                phone,
+                Some("method"),
+                &mut next.settings.method,
+                &[
+                    (Method::Auto, t("Auto")),
+                    (Method::Exact, t("Exact")),
+                    (Method::Rollout, t("Rollout")),
+                    (Method::Mcts, "MCTS"),
+                ],
+            );
+        });
+        let budgets = |ui: &mut egui::Ui, settings: &mut Settings| {
+            setting(ui, phone, t("Time limit (ms; 0 unlimited)"), |ui| {
+                ui.add(egui::DragValue::new(&mut settings.time_ms));
+            });
+            setting(ui, phone, t("Simulations"), |ui| {
+                ui.add(egui::DragValue::new(&mut settings.simulations).range(1..=u64::MAX));
+            });
+            setting(ui, phone, t("Search nodes"), |ui| {
+                ui.add(egui::DragValue::new(&mut settings.max_nodes).range(1..=usize::MAX));
+            });
+            setting(ui, phone, t("MCTS depth limit (0 unlimited)"), |ui| {
+                ui.add(egui::DragValue::new(&mut settings.max_depth));
+            });
+            setting(ui, phone, t("Random seed"), |ui| {
+                ui.add(egui::DragValue::new(&mut settings.seed));
+            });
+        };
+        budgets(ui, &mut next.settings);
+        ui.checkbox(
+            &mut next.settings.conservative_advice,
+            t("Conservative advice: retain baseline unless improvement is established"),
+        );
+        // Model and cache files cannot be read in the browser.
+        if self.browser.is_none() {
             ui.horizontal(|ui| {
                 ui.label("Continuation model (empty = bundled)");
                 let mut path = next
@@ -1611,7 +1705,10 @@ impl Desktop {
                     .as_ref()
                     .map(|p| p.display().to_string())
                     .unwrap_or_default();
-                if ui.text_edit_singleline(&mut path).changed() {
+                if ui
+                    .add(egui::TextEdit::singleline(&mut path).margin(field_margin))
+                    .changed()
+                {
                     next.settings.baseline_model = if path.trim().is_empty() {
                         None
                     } else {
@@ -1627,14 +1724,17 @@ impl Desktop {
                     .as_ref()
                     .map(|p| p.display().to_string())
                     .unwrap_or_default();
-                if ui.text_edit_singleline(&mut path).changed() {
+                if ui
+                    .add(egui::TextEdit::singleline(&mut path).margin(field_margin))
+                    .changed()
+                {
                     next.settings.cache = (!path.trim().is_empty()).then(|| path.into());
                 }
             });
-            ui.small("Depth counts your decisions, not dice or opponents. Simulations finish the whole game. Exact search uses time/nodes.");
-            if next.settings != self.game.session().settings {
-                self.engine_changed(next.settings);
-            }
+        }
+        ui.small(t("Depth counts your decisions, not dice or opponents. Simulations finish the whole game. Exact search uses time/nodes."));
+        if next.settings != self.game.session().settings {
+            self.engine_changed(next.settings);
         }
     }
     fn advice_ui(&mut self, ui: &mut egui::Ui) {
@@ -1739,7 +1839,7 @@ impl Desktop {
                 && !self.game.session().position.hypothetical
                 && let Err(error) = self.game.session().position.infer_next_player()
             {
-                ui.label(error.to_string());
+                ui.label(i18n::error_text(&error));
                 return;
             }
             ui.label(
@@ -2055,7 +2155,7 @@ impl Desktop {
                                 let p = self.pending.take().unwrap();
                                 self.execute(p);
                             }
-                            Err(e) => self.message = e.to_string(),
+                            Err(e) => self.message = i18n::error_text(&e),
                         }
                     }
                     if ui.button("Discard and continue").clicked() {
@@ -2235,7 +2335,7 @@ impl Desktop {
                 });
                 let validation = self.local_setup.session(0);
                 if let Err(e) = &validation {
-                    ui.colored_label(ui.visuals().error_fg_color, e.to_string());
+                    ui.colored_label(ui.visuals().error_fg_color, i18n::error_text(e));
                 }
                 if ui.add_enabled(validation.is_ok(), egui::Button::new(t("Start local game")).min_size(egui::vec2(180.0, 36.0))).clicked() {
                     self.request(Pending::Local(self.local_setup.clone()));
@@ -2377,7 +2477,7 @@ impl Desktop {
         ui.checkbox(&mut self.computer_setup.computer.fast_play, t("Fast play"));
         let validation = self.computer_setup.session(0);
         if let Err(error) = &validation {
-            ui.label(error.to_string());
+            ui.label(i18n::error_text(error));
         }
         if ui
             .add_enabled(
@@ -2550,13 +2650,15 @@ impl Desktop {
         if self.allow_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
+        let phone = ui.available_width() < phone::PHONE_WIDTH;
+        // On the phone, the settings are a page of their own rather than a window.
+        let settings_page = phone && self.show_settings && self.screen == Screen::Play;
         let modal = self.pending.is_some()
             || self.edit.is_some()
             || self.player_sheet.is_some()
-            || self.show_settings;
+            || (self.show_settings && !settings_page);
         ui.add_enabled_ui(!modal, |ui| {
             if self.screen != Screen::Play {
-                let phone = ui.available_width() < phone::PHONE_WIDTH;
                 match self.screen {
                     Screen::Home if phone => self.phone_start_ui(ui),
                     Screen::AnalysisSetup if phone => self.phone_players_ui(ui),
@@ -2566,8 +2668,12 @@ impl Desktop {
                 }
                 return;
             }
-            if ui.available_width() < phone::PHONE_WIDTH {
-                self.phone_ui(ui);
+            if phone {
+                if settings_page {
+                    self.phone_settings_ui(ui);
+                } else {
+                    self.phone_ui(ui);
+                }
                 return;
             }
             self.toolbar_ui(ui);
@@ -2585,7 +2691,10 @@ impl Desktop {
             if let Err(e) = validation {
                 ui.colored_label(
                     ui.visuals().error_fg_color,
-                    tf("Position needs attention: {error}", &[("error", &e)]),
+                    tf(
+                        "Position needs attention: {error}",
+                        &[("error", &i18n::error_text(&e))],
+                    ),
                 );
             }
             ui.separator();
@@ -2649,45 +2758,31 @@ impl Desktop {
                     });
             }
         });
-        if self.show_settings {
+        if self.show_settings && !settings_page {
             let mut open = true;
-            egui::Window::new("Settings")
+            egui::Window::new(t("Settings"))
+                .id(egui::Id::new("settings"))
                 .open(&mut open)
                 .resizable(true)
                 .default_width(540.0)
                 .vscroll(true)
                 .show(&ctx, |ui| {
                     theme_buttons(ui);
-                    ui.horizontal(|ui| {
-                        ui.selectable_value(&mut self.engine_tab, true, "Engine");
-                        ui.selectable_value(&mut self.engine_tab, false, "Game");
-                    });
-                    if !self.engine_tab {
-                        let mut editing = self.game.editing();
-                        if ui
-                            .checkbox(
-                                &mut editing,
-                                "Edit position (enable historical and player editing)",
-                            )
-                            .changed()
-                        {
-                            self.game.set_editing(editing);
-                            self.refresh_revision();
-                        }
-                    }
-                    self.settings_ui(ui);
+                    self.settings_ui(ui, false);
                 });
             self.show_settings = open;
         }
         if let Some(store) = &mut self.preference_store
             && let Some(error) = store.error.clone()
         {
-            egui::Window::new("Preferences")
+            egui::Window::new(t("Preferences"))
+                .id(egui::Id::new("preferences_error"))
                 .collapsible(false)
+                .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -16.0))
                 .show(&ctx, |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(error);
-                        if store.save_failed && ui.button("Retry").clicked() {
+                        ui.label(i18n::error_text(&error));
+                        if store.save_failed && ui.button(t("Retry")).clicked() {
                             store.retry();
                         }
                     });

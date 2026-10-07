@@ -127,6 +127,27 @@ impl Desktop {
         ui.small(t("↺ takes back the last entry."));
     }
 
+    /// „Erweitert“ as a page of its own, with touch-sized controls.
+    pub(super) fn phone_settings_ui(&mut self, ui: &mut egui::Ui) {
+        ui.style_mut().interaction.selectable_labels = false;
+        ui.horizontal(|ui| {
+            ui.set_min_height(TARGET);
+            if big_button(ui, t("‹ Back"), true) {
+                self.show_settings = false;
+            }
+            ui.strong(t("Advanced"));
+        });
+        ui.separator();
+        egui::ScrollArea::vertical()
+            .id_salt("phone_settings")
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().interact_size = egui::vec2(TARGET, TARGET);
+                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                self.settings_ui(ui, true);
+            });
+    }
+
     fn phone_top_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.set_min_height(TARGET);

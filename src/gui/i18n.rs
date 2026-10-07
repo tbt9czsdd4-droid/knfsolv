@@ -126,6 +126,107 @@ pub fn count(n: u64) -> String {
     grouped
 }
 
+/// An engine error or message for the interface: in German, messages users can trigger get their
+/// own wording ([`ENGINE_GERMAN`]), messages with a known beginning keep their original detail, and
+/// anything else is a German sentence with the original text.
+pub fn error_text(error: &dyn Display) -> String {
+    let text = error.to_string();
+    if language() == Language::English {
+        return text;
+    }
+    if let Some((_, german)) = ENGINE_GERMAN.iter().find(|(english, _)| *english == text) {
+        return german.to_string();
+    }
+    for (english, german) in ENGINE_PREFIXES {
+        if let Some(detail) = text.strip_prefix(english) {
+            return format!("{german}{detail}");
+        }
+    }
+    tf("Something went wrong: {error}", &[("error", &text)])
+}
+
+/// Engine messages users can trigger, and their German wording.
+const ENGINE_GERMAN: &[(&str, &str)] = &[
+    (
+        "Physical dice entry is unavailable for this turn",
+        "Hier können gerade keine Würfel eingegeben werden.",
+    ),
+    (
+        "This entry is not legal for these dice",
+        "Dieser Eintrag passt nicht zu diesen Würfeln.",
+    ),
+    (
+        "Inconsistent score sheets: completed-turn counts must follow the configured turn order. Correct the entries to resume analysis.",
+        "Die Spielblätter passen nicht zusammen: Die Zahl der Einträge muss zur Reihenfolge passen. Korrigiere die Einträge, dann geht die Analyse weiter.",
+    ),
+    (
+        "Finish correcting dice and leave Edit position before playing a human move",
+        "Korrigiere zuerst die Würfel und beende „Stellung bearbeiten“, bevor du ziehst.",
+    ),
+    (
+        "Extra Kniffels require 50 in Kniffel and enough completed turns",
+        "Zusatz-Kniffel brauchen 50 Punkte beim Kniffel und genug ausgefüllte Zeilen.",
+    ),
+    (
+        "Enter up to five dice, each from 1 to 6",
+        "Gib bis zu fünf Würfel mit 1 bis 6 Augen ein.",
+    ),
+    (
+        "Enter the physical roll using the face palette",
+        "Gib den Wurf mit den Würfeln unten ein.",
+    ),
+    (
+        "Enter five dice for a consistent position before applying advice",
+        "Gib alle fünf Würfel ein und korrigiere die Stellung, bevor du einen Vorschlag übernimmst.",
+    ),
+    (
+        "Enter a name for every player.",
+        "Gib jedem Spieler einen Namen.",
+    ),
+    (
+        "Enter all five dice, including retained dice",
+        "Gib alle fünf Würfel ein, auch die behaltenen.",
+    ),
+    ("Enter all five dice", "Gib alle fünf Würfel ein."),
+    (
+        "Enable Edit position before changing historical entries",
+        "Schalte „Stellung bearbeiten“ ein, um frühere Einträge zu ändern.",
+    ),
+    ("Die faces must be 1–6", "Würfel zeigen 1 bis 6 Augen."),
+    (
+        "Complete the dice entry before saving, or use Undo to reset the draft",
+        "Gib den Wurf vollständig ein oder setze ihn mit Rückgängig zurück.",
+    ),
+    (
+        "Choose 2–8 players and a starting player.",
+        "Wähle 2–8 Spieler und wer anfängt.",
+    ),
+    (
+        "Category is already filled or invalid",
+        "Dieses Feld ist schon ausgefüllt.",
+    ),
+    (
+        "Action is not legal in this position",
+        "Dieser Zug ist hier nicht möglich.",
+    ),
+    (
+        "Action is not legal in this phase",
+        "Dieser Zug ist gerade nicht möglich.",
+    ),
+];
+
+/// Engine messages that end in a detail, such as a storage error.
+const ENGINE_PREFIXES: &[(&str, &str)] = &[
+    (
+        "Preferences could not be loaded; using defaults. ",
+        "Die Einstellungen ließen sich nicht laden; es gelten die Standardwerte. ",
+    ),
+    (
+        "Preferences were not saved. ",
+        "Die Einstellungen wurden nicht gespeichert. ",
+    ),
+];
+
 fn german(english: &str) -> Option<&'static str> {
     static TABLE: OnceLock<HashMap<&str, &str>> = OnceLock::new();
     TABLE
@@ -656,6 +757,104 @@ const GERMAN: &[(&str, &str)] = &[
     ("Recommended", "Empfohlen"),
     ("Alternative", "Alternative"),
     ("Keep none", "Nichts behalten"),
+    // Settings („Erweitert“).
+    ("‹ Back", "‹ Zurück"),
+    ("Advanced", "Erweitert"),
+    ("Engine", "Berechnung"),
+    ("Game", "Spiel"),
+    (
+        "Edit position (enable historical and player editing)",
+        "Stellung bearbeiten (frühere Einträge und Spieler ändern)",
+    ),
+    (
+        "Score wheel limits (global editor preference)",
+        "Mausrad an den Grenzwerten (für alle Stellungen)",
+    ),
+    ("Stop at ends", "Anhalten"),
+    ("Wrap around", "Von vorn beginnen"),
+    ("Human dice", "Würfel der Menschen"),
+    ("Physical", "Echt"),
+    ("Digital", "App"),
+    ("Active player", "Wer ist dran"),
+    ("Advice for", "Rat für"),
+    ("Hypothetical position", "Angenommene Stellung"),
+    ("Phase", "Phase"),
+    ("Before first roll", "Vor dem ersten Wurf"),
+    ("Finished", "Beendet"),
+    ("Rerolls left", "Würfe übrig"),
+    ("Extra Kniffels (count)", "Zusatz-Kniffel (Anzahl)"),
+    (
+        "Turn order (move players left):",
+        "Reihenfolge (Spieler nach vorn schieben):",
+    ),
+    ("Seat {number} model default", "Platz {number}: Modell"),
+    ("Opportunity", "Chancen"),
+    ("Greedy", "Gierig"),
+    ("Legacy opportunity", "Chancen (alt)"),
+    ("Objective", "Ziel"),
+    (
+        "Shared first (split ties)",
+        "Gewinnchance (Gleichstand geteilt)",
+    ),
+    ("Outright first", "Allein gewinnen"),
+    ("Expected score", "Punkte"),
+    ("Method", "Methode"),
+    ("Auto", "Automatisch"),
+    ("Exact", "Exakt"),
+    ("Rollout", "Simulation"),
+    (
+        "Time limit (ms; 0 unlimited)",
+        "Zeitlimit (ms; 0 = unbegrenzt)",
+    ),
+    ("Search nodes", "Suchknoten"),
+    (
+        "MCTS depth limit (0 unlimited)",
+        "MCTS-Tiefe (0 = unbegrenzt)",
+    ),
+    ("Random seed", "Startwert für den Zufall"),
+    (
+        "Conservative advice: retain baseline unless improvement is established",
+        "Vorsichtige Ratschläge: bei der Grundstrategie bleiben, bis eine Verbesserung gesichert ist",
+    ),
+    (
+        "Depth counts your decisions, not dice or opponents. Simulations finish the whole game. Exact search uses time/nodes.",
+        "Die Tiefe zählt deine Entscheidungen, nicht Würfel oder Gegner. Simulationen spielen die ganze Partie zu Ende. Die exakte Suche nutzt Zeit und Knoten.",
+    ),
+    // Messages.
+    (
+        "Something went wrong: {error}",
+        "Etwas ist schiefgegangen: {error}",
+    ),
+    ("Move applied.", "Zug ausgeführt."),
+    (
+        "Correct the position and complete or discard partial dice entry before analysis.",
+        "Korrigiere die Stellung und gib den Wurf vollständig ein oder verwirf ihn, dann beginnt die Analyse.",
+    ),
+    (
+        "Choosing the declared baseline after a search failure…",
+        "Die Suche ist fehlgeschlagen; der Computer spielt nach seiner Grundstrategie …",
+    ),
+    ("Thinking…", "Denkt nach …"),
+    (
+        "Thinking… {count} completed games",
+        "Denkt nach … {count} Partien",
+    ),
+    (
+        "The search budget ended without advice.",
+        "Die Rechenzeit war um, ohne dass ein Zug gefunden wurde.",
+    ),
+    (
+        "Computer paused: its legal baseline could not be obtained. {reason}",
+        "Computer pausiert: Er konnte keinen gültigen Zug bestimmen. {reason}",
+    ),
+    (
+        "Computer search fallback: {reason} Using the declared legal baseline.",
+        "Die Suche des Computers ist fehlgeschlagen: {reason} Er spielt nach seiner Grundstrategie.",
+    ),
+    ("{name} rolled {dice}.", "{name} würfelt {dice}."),
+    ("{name}: {move}.", "{name}: {move}."),
+    ("Preferences", "Einstellungen"),
+    ("Retry", "Erneut versuchen"),
 ];
 
 #[cfg(test)]
@@ -668,10 +867,14 @@ mod tests {
         let mut found = HashSet::new();
         for entry in std::fs::read_dir("src/gui").unwrap() {
             let path = entry.unwrap().path();
-            if path.extension().is_none_or(|e| e != "rs") || path.ends_with("i18n.rs") {
+            if path.extension().is_none_or(|e| e != "rs") {
                 continue;
             }
-            let source = std::fs::read_to_string(&path).unwrap();
+            let mut source = std::fs::read_to_string(&path).unwrap();
+            if path.ends_with("i18n.rs") {
+                // This file's own texts, without the scanner below.
+                source.truncate(source.find("#[cfg(test)]").unwrap());
+            }
             for call in ["t(", "tf("] {
                 for (at, _) in source.match_indices(call) {
                     let before = source[..at].chars().next_back();
@@ -727,6 +930,43 @@ mod tests {
         assert!(unused.is_empty(), "unused German entries: {unused:#?}");
         let distinct: HashSet<_> = GERMAN.iter().map(|(english, _)| english).collect();
         assert_eq!(distinct.len(), GERMAN.len(), "duplicate English keys");
+    }
+
+    #[test]
+    fn engine_messages_exist_and_unknown_ones_keep_the_original() {
+        let mut sources = String::new();
+        let mut directories = vec![std::path::PathBuf::from("src")];
+        while let Some(directory) = directories.pop() {
+            for entry in std::fs::read_dir(&directory).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() && !path.ends_with("gui") {
+                    directories.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    sources += &std::fs::read_to_string(&path).unwrap();
+                }
+            }
+        }
+        for (english, _) in ENGINE_GERMAN.iter().chain(ENGINE_PREFIXES) {
+            assert!(
+                sources.contains(english.trim_end()),
+                "no engine message: {english}"
+            );
+        }
+        assert_eq!(error_text(&"Enter all five dice"), "Enter all five dice");
+        set_language(Language::German);
+        assert_eq!(
+            error_text(&"Enter all five dice"),
+            "Gib alle fünf Würfel ein."
+        );
+        assert_eq!(
+            error_text(&"Preferences were not saved. Disk full"),
+            "Die Einstellungen wurden nicht gespeichert. Disk full"
+        );
+        assert_eq!(
+            error_text(&"Disk full"),
+            "Etwas ist schiefgegangen: Disk full"
+        );
+        set_language(Language::English);
     }
 
     #[test]

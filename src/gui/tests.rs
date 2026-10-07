@@ -3263,3 +3263,86 @@ fn replace_dialog_is_centered_and_touch_sized_on_the_smallest_phone() {
     assert_eq!(app.screen, Screen::Play);
     assert_eq!(app.game.session().position.players[0].sheet.cells[0], None);
 }
+
+#[test]
+fn phone_settings_are_a_touch_sized_page() {
+    i18n::set_language(i18n::Language::German);
+    for size in PHONE_SIZES {
+        let ctx = egui::Context::default();
+        let mut app = startup(Session::new(2), None);
+        app.execute(Pending::Local(LocalGameConfig::default()));
+        // Editing enables the whole game tab: dice, roller, phase, names, and order.
+        app.game.set_editing(true);
+        app.show_settings = true;
+        for engine_tab in [true, false] {
+            app.engine_tab = engine_tab;
+            render_size(&mut app, &ctx, vec![], size);
+            let output = render_size(&mut app, &ctx, vec![], size);
+            let shown = texts(&output);
+            assert!(shown.contains(&"Erweitert".to_string()), "{shown:?}");
+            assert!(
+                ctx.memory(|m| m.area_rect(egui::Id::new("settings")))
+                    .is_none()
+            );
+            assert_eq!(cut_off_shapes(&output), 0, "{size:?} {engine_tab}");
+            let small = small_targets(&ctx, size);
+            assert!(small.is_empty(), "{size:?} {engine_tab}: {small:?}");
+        }
+        let output = render_size(&mut app, &ctx, vec![], size);
+        click_size(&mut app, &ctx, label_center(&output, "‹ Zurück"), size);
+        assert!(!app.show_settings);
+    }
+    i18n::set_language(i18n::Language::English);
+}
+
+#[test]
+fn desktop_settings_stay_a_window() {
+    let ctx = egui::Context::default();
+    let mut app = startup(Session::new(2), None);
+    app.execute(Pending::Analyze(2));
+    app.show_settings = true;
+    render(&mut app, &ctx, vec![]);
+    render(&mut app, &ctx, vec![]);
+    assert!(
+        ctx.memory(|m| m.area_rect(egui::Id::new("settings")))
+            .is_some()
+    );
+}
+
+#[test]
+fn computer_turn_messages_are_german() {
+    i18n::set_language(i18n::Language::German);
+    let ctx = egui::Context::default();
+    let mut app = computer_app(DiceSource::Digital, ComputerPolicy::Greedy, None);
+    human_scores_first_open(&mut app);
+    assert_eq!(app.message, "Zug ausgeführt.");
+    let mut messages = vec![];
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while app.game.control() == PlayerControl::Computer {
+        assert!(
+            Instant::now() < deadline,
+            "computer did not finish its turn"
+        );
+        app.tick_computer(&ctx, Instant::now());
+        app.poll();
+        if messages.last() != Some(&app.message) {
+            messages.push(app.message.clone());
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    i18n::set_language(i18n::Language::English);
+    assert!(
+        messages.iter().any(|m| m.starts_with("Computer würfelt ")),
+        "{messages:?}"
+    );
+    let played = messages.iter().filter(|m| m.starts_with("Computer: "));
+    assert!(played.clone().count() > 0, "{messages:?}");
+    for message in played {
+        assert!(
+            ["eintragen", "streichen", "neu würfeln"]
+                .iter()
+                .any(|word| message.contains(word)),
+            "{message}"
+        );
+    }
+}
