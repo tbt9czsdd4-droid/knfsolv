@@ -3227,3 +3227,39 @@ fn default_names_follow_the_interface_language() {
     assert_eq!(app.computer_setup.human_name, "Du");
     assert_eq!(loaded.local_setup.names, ["Spieler 1", "Anna"]);
 }
+
+#[test]
+fn replace_dialog_is_centered_and_touch_sized_on_the_smallest_phone() {
+    let size = PHONE_SIZES[0];
+    let mut current = Session::new(2);
+    current.position.players[0].sheet.cells[0] = Some(3);
+    current.position.active_player = 1;
+    let (mut app, _, ctx) = browser_app(current);
+    i18n::set_language(i18n::Language::German);
+    app.request(Pending::Local(LocalGameConfig::default()));
+    assert!(app.pending.is_some());
+    render_size(&mut app, &ctx, vec![], size);
+    let output = render_size(&mut app, &ctx, vec![], size);
+    let dialog = ctx
+        .memory(|m| m.area_rect(egui::Id::new("replace_position")))
+        .unwrap();
+    let discard = label_center(&output, i18n::t("Discard"));
+    let back = label_center(&output, i18n::t("Go back"));
+    assert!(
+        dialog.min.x >= 12.0 && dialog.max.x <= size[0] - 12.0,
+        "{dialog:?}"
+    );
+    assert!(
+        (dialog.center().y - size[1] / 2.0).abs() < 2.0,
+        "{dialog:?}"
+    );
+    assert!(dialog.contains(discard) && dialog.contains(back));
+    assert_eq!(cut_off_shapes(&output), 0);
+    let small = small_targets(&ctx, size);
+    assert!(small.is_empty(), "{small:?}");
+    click_size(&mut app, &ctx, discard, size);
+    i18n::set_language(i18n::Language::English);
+    assert!(app.pending.is_none());
+    assert_eq!(app.screen, Screen::Play);
+    assert_eq!(app.game.session().position.players[0].sheet.cells[0], None);
+}

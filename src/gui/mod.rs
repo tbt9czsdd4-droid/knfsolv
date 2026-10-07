@@ -313,7 +313,15 @@ fn small_die(ui: &mut egui::Ui, face: u8) {
             format!("Retained die {face}"),
         )
     });
-    response.on_hover_text(format!("Keep {face}"));
+    response.on_hover_text(tf("Keep {face}", &[("face", &face)]));
+}
+/// "Reroll 3 dice", with the singular for one die.
+fn reroll_label(count: usize) -> String {
+    if count == 1 {
+        t("Reroll 1 die").into()
+    } else {
+        tf("Reroll {count} dice", &[("count", &count)])
+    }
 }
 fn primary_button(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Response {
     ui.add_enabled(
@@ -353,6 +361,27 @@ fn theme_buttons(ui: &mut egui::Ui) {
         ui.ctx().set_theme(theme);
     }
 }
+/// A report status in words; English shows the engine's identifier with spaces.
+fn status_label(status: &str) -> String {
+    match status {
+        "incomplete" => t("incomplete").into(),
+        "estimated" => t("estimated").into(),
+        "exact_under_model" => t("exact under model").into(),
+        "policy_decision" => t("policy decision").into(),
+        other => other.replace('_', " "),
+    }
+}
+/// A report confidence in words, like [`status_label`].
+fn confidence_label(confidence: &str) -> String {
+    match confidence {
+        "insufficient" => t("insufficient").into(),
+        "low" => t("low").into(),
+        "separated_under_model" => t("separated under model").into(),
+        "exact_under_model" => t("exact under model").into(),
+        "not_applicable" => t("not applicable").into(),
+        other => other.replace('_', " "),
+    }
+}
 fn objective_label(objective: Objective) -> &'static str {
     match objective {
         Objective::SharedFirst => "Shared-first utility (ties split credit)",
@@ -370,35 +399,34 @@ fn statistic_values(metrics: Option<Metrics>) -> [String; 4] {
     metrics
         .map(|m| {
             [
-                format!("{:.1}%", 100. * m.outright_win),
-                format!("{:.1}%", 100. * m.tied_first),
-                format!(
-                    "{:.1}%",
-                    100. * (1. - m.outright_win - m.tied_first).clamp(0., 1.)
-                ),
-                format!("{:.1}", m.expected_score),
+                i18n::percent(m.outright_win, 1),
+                i18n::percent(m.tied_first, 1),
+                i18n::percent((1. - m.outright_win - m.tied_first).clamp(0., 1.), 1),
+                i18n::decimal(m.expected_score, 1),
             ]
         })
-        .unwrap_or_else(|| std::array::from_fn(|_| "Estimating…".into()))
+        .unwrap_or_else(|| std::array::from_fn(|_| t("Estimating…").into()))
 }
 fn move_statistics(ui: &mut egui::Ui, metrics: Option<Metrics>) {
     let values = statistic_values(metrics);
+    let outcomes = t("Win: outright first. Tie: tied for first. Lose: all remaining outcomes.");
+    let labels = [
+        (t("Win"), outcomes),
+        (t("Tie"), outcomes),
+        (t("Lose"), outcomes),
+        (
+            t("Expected final game score"),
+            t("Expected total at the end of the game, including future turns and bonuses."),
+        ),
+    ];
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 12.0;
-        for (label, value) in ["Win", "Tie", "Lose", "Expected final game score"]
-            .into_iter()
-            .zip(values)
-        {
+        for (i, ((label, help), value)) in labels.into_iter().zip(values).enumerate() {
             ui.vertical(|ui| {
-                if label != "Expected final game score" {
+                if i < 3 {
                     ui.set_width(76.0);
                 }
-                ui.small(label)
-                    .on_hover_text(if label == "Expected final game score" {
-                        "Expected total at the end of the game, including future turns and bonuses."
-                    } else {
-                        "Win: outright first. Tie: tied for first. Lose: all remaining outcomes."
-                    });
+                ui.small(label).on_hover_text(help);
                 ui.label(value);
             });
         }
@@ -1178,27 +1206,27 @@ impl Desktop {
             let phase = self.game.session().position.phase;
             let physical = self.game.physical_entry_allowed();
             ui.horizontal_wrapped(|ui| {
-                ui.heading(if self.game.position_editor() { "Dice (optional)" } else { "Dice" });
+                ui.heading(if self.game.position_editor() { t("Dice (optional)") } else { t("Dice") });
                 if self.game.position_editor() && !self.game.session().position.hypothetical {
                     match self.game.session().position.infer_next_player() {
-                        Ok(Some(player)) => { ui.strong(format!("Next: {}", self.game.session().position.players[player].name)); }
-                        Ok(None) => { ui.strong("Game finished"); }
-                        Err(_) => { ui.strong("Next player unresolved"); }
+                        Ok(Some(player)) => { ui.strong(tf("Next: {name}", &[("name", &self.game.session().position.players[player].name)])); }
+                        Ok(None) => { ui.strong(t("Game finished")); }
+                        Err(_) => { ui.strong(t("Next player unresolved")); }
                     }
                 } else {
-                    ui.strong(format!("Turn: {}", self.game.session().position.players[self.game.session().position.active_player].name));
+                    ui.strong(tf("Turn: {name}", &[("name", &self.game.session().position.players[self.game.session().position.active_player].name)]));
                 }
-                if let Phase::Decision { rerolls_left, .. } = phase { ui.label(format!("{rerolls_left} {} left", if rerolls_left == 1 { "reroll" } else { "rerolls" })); }
+                if let Phase::Decision { rerolls_left, .. } = phase { ui.label(if rerolls_left == 1 { t("1 reroll left").into() } else { tf("{count} rerolls left", &[("count", &rerolls_left)]) }); }
             });
             ui.small(match phase {
-                Phase::BeforeFirstRoll if self.game.position_editor() => "Forecast averages over future rolls. Optionally enter five faces for move advice.",
-                _ if self.game.control() == PlayerControl::Computer && !self.game.editing() => "The computer rolls and plays automatically.",
-                Phase::BeforeFirstRoll | Phase::AwaitingRoll { .. } if !physical => "Ready when you are. Roll to continue.",
-                Phase::BeforeFirstRoll => "Enter five faces with the picker or keys 1–6.",
-                Phase::AwaitingRoll { .. } => "Enter new faces only. Retained dice are locked.",
-                Phase::Decision { .. } if physical => "Click dice to keep. Use the picker or 1–6 to correct the selected die.",
-                Phase::Decision { .. } => "Click dice to keep, then reroll or choose a score.",
-                Phase::Finished => "Game finished.",
+                Phase::BeforeFirstRoll if self.game.position_editor() => t("Forecast averages over future rolls. Optionally enter five faces for move advice."),
+                _ if self.game.control() == PlayerControl::Computer && !self.game.editing() => t("The computer rolls and plays automatically."),
+                Phase::BeforeFirstRoll | Phase::AwaitingRoll { .. } if !physical => t("Ready when you are. Roll to continue."),
+                Phase::BeforeFirstRoll => t("Enter five faces with the picker or keys 1–6."),
+                Phase::AwaitingRoll { .. } => t("Enter new faces only. Retained dice are locked."),
+                Phase::Decision { .. } if physical => t("Click dice to keep. Use the picker or 1–6 to correct the selected die."),
+                Phase::Decision { .. } => t("Click dice to keep, then reroll or choose a score."),
+                Phase::Finished => t("Game finished."),
             });
             ui.add_space(6.);
             let suggested = self.suggested_keeps();
@@ -1212,16 +1240,24 @@ impl Desktop {
                             let face = self.game.dice().faces[i];
                             let locked = self.game.dice().locked[i];
                             let keep = self.game.dice().keep[i];
-                            let status = if locked { "Locked" } else if keep { "Keep" } else if face == 0 { if physical { "Enter" } else { "Ready" } } else if matches!(phase, Phase::Decision { rerolls_left: 1..=2, .. }) { "Reroll" } else { "Rolled" };
+                            let state = if locked { "Locked" } else if keep { "Keep" } else if face == 0 { if physical { "Enter" } else { "Ready" } } else if matches!(phase, Phase::Decision { rerolls_left: 1..=2, .. }) { "Reroll" } else { "Rolled" };
+                            let status = match state {
+                                "Locked" => t("Locked"),
+                                "Keep" => t("Kept"),
+                                "Enter" => t("Enter"),
+                                "Ready" => t("Ready"),
+                                "Reroll" => t("Reroll"),
+                                _ => t("Rolled"),
+                            };
                             let response = ui.add_enabled_ui(!locked && phase != Phase::Finished && (self.game.editing() || self.game.control() == PlayerControl::Human), |ui| {
                                 die_button(ui, face, tile, keep || locked, self.game.dice().selected == Some(i),
-                                    format!("Die {}: {}; {status}{}", i + 1, if face == 0 { "empty".into() } else { face.to_string() }, if hint { "; Advice" } else { "" }))
+                                    format!("Die {}: {}; {state}{}", i + 1, if face == 0 { "empty".into() } else { face.to_string() }, if hint { "; Advice" } else { "" }))
                             }).inner;
-                            if response.on_hover_text("Click to select for correction and toggle Keep. Advice is the engine recommendation only.").clicked() {
+                            if response.on_hover_text(t("Click to select for correction and toggle Keep. Advice is the engine recommendation only.")).clicked() {
                                 self.game.select_die(i, true);
                             }
                             ui.small(status);
-                            ui.small(if hint { "★ Advice" } else { " " });
+                            ui.small(if hint { t("★ Advice") } else { " " });
                         });
                     });
                 }
@@ -1239,23 +1275,23 @@ impl Desktop {
                                 }).inner;
                                 #[cfg(test)]
                                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("picker_rect", face)), response.rect));
-                                if response.on_hover_text(format!("Enter {face} · key {face}")).clicked() { self.choose_face(face, Instant::now()); }
+                                if response.on_hover_text(tf("Enter {face} · key {face}", &[("face", &face)])).clicked() { self.choose_face(face, Instant::now()); }
                             }
-                            if ui.add_sized([44., 32.], egui::Button::new("Clear")).on_hover_text("Backspace: clear the last editable die").clicked() { self.clear_die(Instant::now()); }
+                            if ui.add_sized([44., 32.], egui::Button::new(t("Clear"))).on_hover_text(t("Backspace: clear the last editable die")).clicked() { self.clear_die(Instant::now()); }
                         });
                     });
                 }
                 let can_roll = self.game.human_can_play();
                 match phase {
                     Phase::BeforeFirstRoll | Phase::AwaitingRoll { .. } if self.game.dice_source() == DiceSource::Digital => {
-                        if primary_button(ui, "Roll", can_roll).clicked() {
+                        if primary_button(ui, t("Roll"), can_roll).clicked() {
                             let result = self.game.roll_digital(Instant::now()); self.outcome(result); self.refresh_revision();
                         }
                     }
                     Phase::Decision { rerolls_left, .. } => {
                         let count = self.game.dice().keep.iter().filter(|&&k| !k).count();
-                        if primary_button(ui, &format!("Reroll {count} {}", if count == 1 { "die" } else { "dice" }), can_roll && rerolls_left > 0 && count > 0)
-                            .on_hover_text(if physical { "Retain selected dice, then enter the new physical faces." } else { "Generate the unkept dice now." }).clicked() {
+                        if primary_button(ui, &reroll_label(count), can_roll && rerolls_left > 0 && count > 0)
+                            .on_hover_text(if physical { t("Retain selected dice, then enter the new physical faces.") } else { t("Generate the unkept dice now.") }).clicked() {
                             let result = self.game.reroll_selected(Instant::now()); self.outcome(result); self.refresh_revision();
                         }
                     }
@@ -1264,12 +1300,12 @@ impl Desktop {
             });
             if self.game.position_editor() && phase != Phase::Finished
                 && (phase != Phase::BeforeFirstRoll || self.game.dice().faces != [0; 5])
-                && ui.button("Analyze before first roll").clicked() {
+                && ui.button(t("Analyze before first roll")).clicked() {
                 let result = self.game.analyze_before_roll();
                 self.outcome(result);
                 self.refresh_revision();
             }
-            if self.dice_draft() { ui.small(if self.game.dice().faces.contains(&0) { "Complete the roll to continue." } else { "Updating roll…" }); }
+            if self.dice_draft() { ui.small(if self.game.dice().faces.contains(&0) { t("Complete the roll to continue.") } else { t("Updating roll…") }); }
         });
     }
     fn sheet_ui(&mut self, ui: &mut egui::Ui) {
@@ -1277,13 +1313,13 @@ impl Desktop {
     }
     fn sheet_contents(&mut self, ui: &mut egui::Ui) {
         ui.set_width(ui.available_width());
-        ui.heading("Score sheets");
+        ui.heading(t("Score sheets"));
         ui.small(if self.game.position_editor() {
-            "Click a score to pick its value, or hover and scroll. Open = unfilled; 0 = crossed out. Filled entries determine the next player."
+            t("Click a score to pick its value, or hover and scroll. Open = unfilled; 0 = crossed out. Filled entries determine the next player.")
         } else if self.game.editing() {
-            "Edit mode: click any entry. Empty = open; 0 = crossed out. Turns are paused."
+            t("Edit mode: click any entry. Empty = open; 0 = crossed out. Turns are paused.")
         } else {
-            "Click an available score to end the turn, including 0. Undo restores it. ★ = advice."
+            t("Click an available score to end the turn, including 0. Undo restores it. ★ = advice.")
         });
         let mut action = None;
         let mut wheel_cell = None;
@@ -1291,21 +1327,21 @@ impl Desktop {
         let suggested = self.report.as_ref().and_then(|r| r.best_action);
         egui::ScrollArea::horizontal().id_salt("sheets").show(ui, |ui| {
             egui::Grid::new("sheet").striped(true).min_col_width(85.0).min_row_height(26.0).show(ui, |ui| {
-                ui.strong("Category");
+                ui.strong(t("Category"));
                 for (i, p) in self.game.session().position.players.iter().enumerate() {
                     let active = i == self.game.session().position.active_player && self.game.session().position.phase != Phase::Finished
                         && (!self.game.position_editor() || self.game.session().position.hypothetical || self.game.session().position.infer_next_player().is_ok());
-                    ui.label(egui::RichText::new(format!("{}{}", p.name, if active { " (turn)" } else { "" })).strong()
+                    ui.label(egui::RichText::new(format!("{}{}", p.name, if active { t(" (turn)") } else { "" })).strong()
                         .background_color(if active { ui.visuals().selection.bg_fill } else { egui::Color32::TRANSPARENT }));
                 }
                 ui.end_row();
                 for category in 0..13 {
-                    ui.label(rules::NAMES[category]);
+                    ui.label(i18n::category_name(category));
                     for (player, p) in self.game.session().position.players.iter().enumerate() {
                         let value = p.sheet.cells[category];
                         if self.game.editing() {
                             let response = ui.push_id(("score_cell", player, category), |ui| {
-                                ui.add_sized([76., 26.], egui::Button::new(value.map(|v| v.to_string()).unwrap_or_else(|| "Open".into())))
+                                ui.add_sized([76., 26.], egui::Button::new(value.map(|v| v.to_string()).unwrap_or_else(|| t("Open").into())))
                             }).inner;
                             #[cfg(test)]
                             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("score_cell_rect", player, category)), response.rect));
@@ -1313,7 +1349,7 @@ impl Desktop {
                                 wheel_cell = Some((player, category));
                             }
                             let response = if self.game.position_editor() {
-                                response.on_hover_text("Scroll up/down through legal scores, or click to pick one. Open = unfilled; 0 = crossed out. Wheel limits: Settings → Game.")
+                                response.on_hover_text(t("Scroll up/down through legal scores, or click to pick one. Open = unfilled; 0 = crossed out. Wheel limits: Settings → Game."))
                             } else { response };
                             if response.clicked() {
                                 self.edit = Some((player, category));
@@ -1328,18 +1364,18 @@ impl Desktop {
                             let computer_choice = matches!(self.game.pending_computer_action(), Some(Action::Write { category: c } | Action::CrossOut { category: c }) if c == category);
                             let label = if computer_choice { format!("{points} ← Computer") } else if ready { format!("{points}{}", if hint { " ★" } else { "" }) } else if self.game.control() == PlayerControl::Computer { points.to_string() } else { "…".into() };
                             if ui.add_enabled(ready, egui::Button::new(label).min_size(egui::vec2(76.0, 26.0)))
-                                .on_hover_text(if rules::extra_eligible(&p.sheet, dice) { "Score and advance; also awards 50 extra Kniffel points." } else { "Score and advance to the next player." }).clicked()
+                                .on_hover_text(if rules::extra_eligible(&p.sheet, dice) { t("Score and advance; also awards 50 extra Kniffel points.") } else { t("Score and advance to the next player.") }).clicked()
                             {
                                 action = Some(if points == 0 { Action::CrossOut { category } } else { Action::Write { category } });
                             }
                         } else {
-                            ui.label("Open");
+                            ui.label(t("Open"));
                         }
                     }
                     ui.end_row();
                 }
                 for row in 0..4 {
-                    ui.strong(["Upper subtotal", "Upper bonus", "Extra points", "TOTAL"][row]);
+                    ui.strong([t("Upper subtotal"), t("Upper bonus"), t("Extra points"), t("TOTAL")][row]);
                     for p in &self.game.session().position.players {
                         ui.strong(match row {
                             0 => p.sheet.upper(), 1 => p.sheet.bonus(),
@@ -1603,40 +1639,43 @@ impl Desktop {
     }
     fn advice_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
-            if ui.small_button("Engine settings").clicked() { self.show_settings = true; self.engine_tab = true; }
+            if ui.small_button(t("Engine settings")).clicked() { self.show_settings = true; self.engine_tab = true; }
             let label = match self.report.as_ref().and_then(|r| r.progress) {
-                None => "Preparing…".to_owned(),
-                Some(p) => match p.phase {
-                    crate::solver::SearchPhase::MctsTraining => format!("Tree depth {}", p.max_decision_depth),
-                    crate::solver::SearchPhase::MctsValidation => format!("Tree depth {} · validating", p.max_decision_depth),
-                    crate::solver::SearchPhase::Exact => format!("Exact depth {}", p.max_decision_depth),
-                    crate::solver::SearchPhase::Rollout => "Full-game rollouts".to_owned(),
-                },
+                None => t("Preparing…").to_owned(),
+                Some(p) => {
+                    let depth = [("depth", &p.max_decision_depth as &dyn std::fmt::Display)];
+                    match p.phase {
+                        crate::solver::SearchPhase::MctsTraining => tf("Tree depth {depth}", &depth),
+                        crate::solver::SearchPhase::MctsValidation => tf("Tree depth {depth} · validating", &depth),
+                        crate::solver::SearchPhase::Exact => tf("Exact depth {depth}", &depth),
+                        crate::solver::SearchPhase::Rollout => t("Full-game rollouts").to_owned(),
+                    }
+                }
             };
-            ui.small(label).on_hover_text("Deepest explored branch, not a depth completed uniformly across every move. Counts the analyzed player's decisions (root = 1), excluding dice outcomes, opponents and baseline rollout continuation.");
+            ui.small(label).on_hover_text(t("Deepest explored branch, not a depth completed uniformly across every move. Counts the analyzed player's decisions (root = 1), excluding dice outcomes, opponents and baseline rollout continuation."));
         });
         if !self.computer_notice.is_empty() {
             ui.label(&self.computer_notice);
         }
         if self.game.control() == PlayerControl::Computer && !self.game.editing() {
-            ui.heading("Computer turn");
+            ui.heading(t("Computer turn"));
             let config = &self.game.session().desktop.as_ref().unwrap().computer;
             ui.label(if config.search.is_some() {
-                "Custom search · strength uncalibrated"
+                t("Custom search · strength uncalibrated")
             } else {
-                config.policy.label()
+                policy_label(config.policy)
             });
             if config.paused {
-                ui.label("Computer paused.");
+                ui.label(t("Computer paused."));
             } else if let Some(action) = self.game.pending_computer_action() {
-                ui.strong(format!("Choice: {action}"));
+                ui.strong(tf("Choice: {move}", &[("move", &self.move_title(action))]));
             } else if self.computer_requested.is_some() {
                 ui.spinner();
             }
             if !self.computer_status.is_empty() {
                 ui.label(&self.computer_status);
             }
-            ui.small("Coaching resumes for the next human turn.");
+            ui.small(t("Coaching resumes for the next human turn."));
             return;
         }
         let mut mode = self.analysis_mode;
@@ -1647,25 +1686,28 @@ impl Desktop {
                     && !self.game.session().position.hypothetical
                     && self.game.session().position.infer_next_player().is_err()
                 {
-                    "Analysis paused · inconsistent sheets".into()
+                    t("Analysis paused · inconsistent sheets").into()
                 } else if self.before_roll_forecast() {
-                    format!(
-                        "Before-roll forecast · {}",
-                        self.game.session().position.players
-                            [self.game.session().settings.perspective]
-                            .name
+                    tf(
+                        "Before-roll forecast · {name}",
+                        &[(
+                            "name",
+                            &self.game.session().position.players
+                                [self.game.session().settings.perspective]
+                                .name,
+                        )],
                     )
                 } else {
-                    "Advice".into()
+                    t("Advice").into()
                 },
             );
-            ui.selectable_value(&mut mode, AnalysisMode::Continuous, "Continuous");
-            ui.selectable_value(&mut mode, AnalysisMode::Limited, "Limited");
+            ui.selectable_value(&mut mode, AnalysisMode::Continuous, t("Continuous"));
+            ui.selectable_value(&mut mode, AnalysisMode::Limited, t("Limited"));
             if ui
                 .button(if paused {
-                    "Resume analysis"
+                    t("Resume analysis")
                 } else {
-                    "Pause analysis"
+                    t("Pause analysis")
                 })
                 .clicked()
             {
@@ -1684,7 +1726,7 @@ impl Desktop {
             {
                 self.compute_longer();
             }
-            if self.analysis_done && ui.button("Restart analysis").clicked() {
+            if self.analysis_done && ui.button(t("Restart analysis")).clicked() {
                 let result = self.analyze(ui.ctx());
                 self.outcome(result);
             }
@@ -1702,30 +1744,35 @@ impl Desktop {
             }
             ui.label(
                 if matches!(self.game.session().position.phase, Phase::Finished) {
-                    "Game finished."
+                    t("Game finished.")
+                } else if self.game.position_editor() {
+                    t("Analysis waits: correct the position, or complete five dice or choose Analyze before first roll.")
                 } else {
-                    if self.game.position_editor() { "Analysis waits: correct the position, or complete five dice or choose Analyze before first roll." } else { "Coaching waits for a complete, valid human roll." }
+                    t("Coaching waits for a complete, valid human roll.")
                 },
             );
             return;
         }
         if let Some(report) = &self.report {
             let progress = if self.analysis_paused {
-                "Paused"
+                t("Paused")
             } else if self.running.is_some() {
-                "Refining"
+                t("Refining")
             } else {
-                "Stopped"
+                t("Stopped")
             };
             ui.small(format!(
-                "{progress} · {}{} · Confidence: {}",
+                "{progress} · {}{} · {}",
                 if report.recommendation_basis.starts_with("baseline_") {
-                    "Provisional baseline · "
+                    t("Provisional baseline · ")
                 } else {
                     ""
                 },
-                report.status.replace('_', " "),
-                report.confidence.replace('_', " ")
+                status_label(&report.status),
+                tf(
+                    "Confidence: {confidence}",
+                    &[("confidence", &confidence_label(&report.confidence))]
+                )
             ));
             if self.before_roll_forecast() {
                 move_statistics(
@@ -1738,12 +1785,16 @@ impl Desktop {
                             .and_then(|a| a.metrics)
                     }),
                 );
-                ui.small("Averaged over possible future rolls and modeled play.");
-                ui.small(format!(
-                    "{} completed games · {:.2}s computing · {}",
-                    report.samples,
-                    report.elapsed_ms as f64 / 1000.,
-                    report.stop_reason
+                ui.small(t("Averaged over possible future rolls and modeled play."));
+                ui.small(tf(
+                    "{count} games · {seconds} s computing",
+                    &[
+                        ("count", &i18n::count(report.samples)),
+                        (
+                            "seconds",
+                            &i18n::decimal(report.elapsed_ms as f64 / 1000., 2),
+                        ),
+                    ],
                 ));
                 return;
             }
@@ -1759,9 +1810,9 @@ impl Desktop {
                     play = Some(action);
                 }
             } else {
-                ui.label("No recommendation yet.");
+                ui.label(t("No recommendation yet."));
                 if report.forecast.is_some() {
-                    ui.strong("Game forecast");
+                    ui.strong(t("Game forecast"));
                     move_statistics(ui, report.forecast);
                 }
             }
@@ -1782,15 +1833,16 @@ impl Desktop {
             if others.len() > 3
                 && ui
                     .button(if self.show_all_moves {
-                        "Show fewer"
+                        t("Show fewer")
                     } else {
-                        "Show all moves"
+                        t("Show all moves")
                     })
                     .clicked()
             {
                 self.show_all_moves = !self.show_all_moves;
             }
-            egui::CollapsingHeader::new("Analysis details")
+            // Engine terms stay English here, as on the phone's „Technische Details“.
+            egui::CollapsingHeader::new(t("Analysis details"))
                 .id_salt("analysis_details").default_open(false).show(ui, |ui| {
                     let s = &report.settings;
                     ui.label(format!("For {} · {}", self.game.session().position.players[s.perspective].name, report.method));
@@ -1832,42 +1884,41 @@ impl Desktop {
             }
         } else {
             ui.label(if self.analysis_paused {
-                "Paused · waiting for an estimate."
+                t("Paused · waiting for an estimate.")
             } else {
-                "Preparing provisional baseline advice…"
+                t("Preparing provisional baseline advice…")
             });
         }
     }
     fn move_title(&self, action: Action) -> String {
         match action {
-            Action::CrossOut { category } => {
-                format!("Score {} · 0 points now", rules::NAMES[category])
-            }
+            Action::CrossOut { category } => tf(
+                "Score {category} · {points} points now",
+                &[("category", &i18n::category_name(category)), ("points", &0)],
+            ),
             Action::Write { category } => {
                 if let Phase::Decision { dice, .. } = self.game.session().position.phase {
                     let sheet = &self.game.session().position.players
                         [self.game.session().position.active_player]
                         .sheet;
-                    format!(
-                        "Score {} · {} points now{}",
-                        rules::NAMES[category],
-                        rules::score(sheet, dice, category),
-                        if rules::extra_eligible(sheet, dice) {
-                            " (+50 extra Kniffel)"
-                        } else {
-                            ""
-                        }
-                    )
+                    let title = tf(
+                        "Score {category} · {points} points now",
+                        &[
+                            ("category", &i18n::category_name(category)),
+                            ("points", &rules::score(sheet, dice, category)),
+                        ],
+                    );
+                    if rules::extra_eligible(sheet, dice) {
+                        title + t(" (+50 extra Kniffel)")
+                    } else {
+                        title
+                    }
                 } else {
                     action.to_string()
                 }
             }
-            Action::Reroll { keep } => format!(
-                "Reroll {} {}",
-                5 - keep.len(),
-                if keep.len() == 4 { "die" } else { "dice" }
-            ),
-            Action::RollAll => "Roll all five dice".into(),
+            Action::Reroll { keep } => reroll_label(5 - keep.len()),
+            Action::RollAll => t("Roll all five dice").into(),
         }
     }
     fn move_card(
@@ -1894,15 +1945,19 @@ impl Desktop {
                         ui.set_width(ui.available_width());
                         ui.horizontal_wrapped(|ui| {
                             ui.strong(if recommended {
-                                "Recommended"
+                                t("Recommended")
                             } else {
-                                "Alternative"
+                                t("Alternative")
                             });
                             ui.label(self.move_title(action));
                         });
                         if let Action::Reroll { keep } = action {
                             ui.horizontal_wrapped(|ui| {
-                                ui.small(if keep.is_empty() { "Keep none" } else { "Keep" });
+                                ui.small(if keep.is_empty() {
+                                    t("Keep none")
+                                } else {
+                                    t("Keep")
+                                });
                                 for face in keep.faces() {
                                     small_die(ui, face);
                                 }
@@ -1920,9 +1975,9 @@ impl Desktop {
                                 (self.game.can_apply_advice(), label)
                             } else {
                                 let label = if recommended {
-                                    "Play suggestion"
+                                    t("Play suggestion")
                                 } else {
-                                    "Play this move"
+                                    t("Play this move")
                                 };
                                 (self.game.human_can_play(), label)
                             };
@@ -1957,18 +2012,28 @@ impl Desktop {
     fn dialogs(&mut self, ctx: &egui::Context) {
         self.picker_ui(ctx);
         self.player_sheet_ui(ctx);
+        // Centered, narrower than the smallest phone, with 44-point buttons.
+        let width = (ctx.content_rect().width() - 48.0).clamp(200.0, 320.0);
         if self.pending.is_some() && self.browser.is_some() {
             egui::Window::new(t("Replace position"))
+                .id(egui::Id::new("replace_position"))
                 .collapsible(false)
                 .resizable(false)
+                .min_width(width)
+                .max_width(width)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .show(ctx, |ui| {
                     ui.label(t("Discard the current position?"));
+                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if ui.button(t("Discard")).clicked() {
+                        let half = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+                        let button =
+                            |label| egui::Button::new(label).min_size(egui::vec2(half, 44.0));
+                        if ui.add(button(t("Discard"))).clicked() {
                             let p = self.pending.take().unwrap();
                             self.execute(p);
                         }
-                        if ui.button(t("Go back")).clicked() {
+                        if ui.add(button(t("Go back"))).clicked() {
                             self.pending = None;
                         }
                     });
@@ -1977,6 +2042,7 @@ impl Desktop {
             egui::Window::new("Unsaved changes")
                 .collapsible(false)
                 .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .show(ctx, |ui| {
                     ui.label("Save the current session before continuing?");
                     ui.label(format!(
@@ -2373,34 +2439,34 @@ impl Desktop {
                 let mut editing = self.game.editing();
                 egui::ComboBox::from_id_salt("play_mode")
                     .selected_text(if self.game.editing() {
-                        "Edit position"
+                        t("Edit position")
                     } else if self.game.dice_source() == DiceSource::Digital {
-                        "Digital play"
+                        t("Digital play")
                     } else {
-                        "Physical play"
+                        t("Physical play")
                     })
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut editing, false, "Play");
-                        ui.selectable_value(&mut editing, true, "Edit position");
+                        ui.selectable_value(&mut editing, false, t("Play"));
+                        ui.selectable_value(&mut editing, true, t("Edit position"));
                     });
                 self.game.set_editing(editing);
                 self.refresh_revision();
                 ui.separator();
                 if ui
-                    .add_enabled(self.game.can_undo(), egui::Button::new("Undo"))
-                    .on_hover_text("Ctrl/Cmd-Z · first resets unfinished dice corrections")
+                    .add_enabled(self.game.can_undo(), egui::Button::new(t("Undo")))
+                    .on_hover_text(t("Ctrl/Cmd-Z · first resets unfinished dice corrections"))
                     .clicked()
                 {
                     self.undo(false);
                 }
                 if ui
-                    .add_enabled(self.game.can_redo(), egui::Button::new("Redo"))
+                    .add_enabled(self.game.can_redo(), egui::Button::new(t("Redo")))
                     .clicked()
                 {
                     self.undo(true);
                 }
                 ui.separator();
-                ui.menu_button("File", |ui| {
+                ui.menu_button(t("File"), |ui| {
                     if self.browser.is_some() {
                         if ui.button(t("Share position")).clicked() {
                             let result = self.share();
@@ -2427,12 +2493,12 @@ impl Desktop {
                         }
                     }
                     ui.separator();
-                    if ui.button("New game").clicked() {
+                    if ui.button(t("New game")).clicked() {
                         self.navigate(Screen::Home);
                         ui.close();
                     }
                 });
-                ui.toggle_value(&mut self.show_settings, "Settings");
+                ui.toggle_value(&mut self.show_settings, t("Settings"));
                 if self.game.has_computer() {
                     ui.separator();
                     let config = &self.game.session().desktop.as_ref().unwrap().computer;
@@ -2440,16 +2506,16 @@ impl Desktop {
                     let mut fast = config.fast_play;
                     if ui
                         .button(if paused {
-                            "Resume computer"
+                            t("Resume computer")
                         } else {
-                            "Pause computer"
+                            t("Pause computer")
                         })
                         .clicked()
                     {
                         self.game.set_computer_paused(!paused);
                         self.refresh_revision();
                     }
-                    if ui.checkbox(&mut fast, "Fast play").changed() {
+                    if ui.checkbox(&mut fast, t("Fast play")).changed() {
                         self.game.set_fast_play(fast, Instant::now());
                     }
                 }
@@ -2519,7 +2585,7 @@ impl Desktop {
             if let Err(e) = validation {
                 ui.colored_label(
                     ui.visuals().error_fg_color,
-                    format!("Position needs attention: {e}"),
+                    tf("Position needs attention: {error}", &[("error", &e)]),
                 );
             }
             ui.separator();

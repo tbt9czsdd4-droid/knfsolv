@@ -1,6 +1,6 @@
 # iPhone web app plan
 
-Status: Phases 0–4 done (2026-10-07; Pages deployment postponed; the family test of Phase 4 is still open); Phase 5 in progress (step 1 of 5 done). This replaces the earlier draft (commit `edcef33`).
+Status: Phases 0–4 done (2026-10-07; Pages deployment postponed; the family test of Phase 4 is still open); Phase 5 in progress (step 2 of 5 done). This replaces the earlier draft (commit `edcef33`).
 Sources: [the brainstorm](iphone-web-app-brainstorm.md), code inspection, and measurements taken on 2026-10-04 (section 3).
 
 ## 1. Goal
@@ -435,7 +435,7 @@ Estimates are focused working days. Each phase ends with something testable on t
 
 **Status (2026-10-07): in progress, in five steps, each committed as "Phase 5.N" and reported before the next one starts.** "Normal flows" include the desktop layout, which the web app shows from 600 points on (iPad, a phone held sideways).
 1. Done: setup and results screens. Below 600 points, „Lokales Spiel“ (2–8 players, optional names, „Wer fängt an?“, *Echte Würfel* / *Die App würfelt*) and „Gegen den Computer“ (your name, who starts, your dice, *Leicht* / *Mittel* / *Stark*) have phone screens in the style of „Wer spielt mit?“. Names typed once carry over between the three setups, and the names of the last local game come back. A finished game shows the standings, best first, with *Neues Spiel*. The desktop setup and results screens and the theme buttons go through `t()`; default names follow the language („Spieler 2“, „Du“), including names saved in English. Text fields on phone screens are 44 points tall, player columns grow up to 90 points when there is room (so „Computer“ fits), and with app dice the advice area says „Würfle, dann gibt es einen Rat.“
-2. Desktop layout: toolbar, dice panel, score sheets, advice, dialogs. The confirmation dialogs („Aktuelle Stellung verwerfen?“ when a new game or position replaces one with entries, unsaved changes) open centered, fit 312 points, and have 44-point buttons; today they open at the top left with desktop-sized buttons.
+2. Done: desktop layout. The toolbar, dice panel, score sheets, advice panel, and move cards go through `t()`, hover help included; category names follow the language, and win/tie/lose percentages and the expected score use `percent`/`decimal`. The engine's status and confidence identifiers become words („Beendet · geschätzt · Sicherheit: niedrig“), and *Analysis details* is „Technische Details“, whose engine terms stay English as planned. „Stellung ersetzen“ („Aktuelle Stellung verwerfen?“) opens centered with a fixed id, fits 312 points with a gutter, and has two 44-point buttons; the desktop's unsaved-changes dialog is centered too. Left for step 3: the settings window, messages, and engine errors; the desktop-only file controls (*Session path*, *Load session*) stay English because the web app never shows them.
 3. Settings (*Erweitert …*) and messages: controller and computer messages, and errors users can trigger (a German sentence, the original under *Technische Details*). On the phone, *Erweitert …* becomes a full-width, scrollable sheet with 44-point controls instead of the 540-point desktop window at the top left.
 4. German number formatting everywhere, and a rendering test that looks for English in normal flows.
 5. *Hilfe & Regeln* with the QR code; documentation.
