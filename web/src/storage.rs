@@ -28,5 +28,7 @@ fn local_storage() -> Result<web_sys::Storage> {
 }
 
 fn unavailable(error: JsValue) -> Error {
-    Error::Invalid(format!("Browser storage is unavailable. {error:?}"))
+    Error::Invalid(format!(
+        "Der Speicher des Browsers ist nicht verfügbar. {error:?}"
+    ))
 }

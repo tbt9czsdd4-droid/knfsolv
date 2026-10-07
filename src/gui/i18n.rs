@@ -3,7 +3,7 @@
 //!
 //! A test reads every source file of the interface and fails when a text passed to `t` or `tf`
 //! has no German entry, or when an entry is no longer used.
-use std::{cell::Cell, collections::HashMap, fmt::Display, sync::OnceLock};
+use std::{cell::Cell, collections::HashMap, fmt::Display, ops::RangeInclusive, sync::OnceLock};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Language {
@@ -115,7 +115,11 @@ pub fn count(n: u64) -> String {
         Language::English => ",",
         Language::German => "\u{a0}",
     };
-    let digits = n.to_string();
+    group(&n.to_string(), separator)
+}
+
+/// `digits` with `separator` between groups of three, counted from the right.
+fn group(digits: &str, separator: &str) -> String {
     let mut grouped = String::new();
     for (i, digit) in digits.chars().enumerate() {
         if i > 0 && (digits.len() - i).is_multiple_of(3) {
@@ -124,6 +128,22 @@ pub fn count(n: u64) -> String {
         grouped.push(digit);
     }
     grouped
+}
+
+/// egui's number format for `DragValue` fields in German: "20 000", "1,5". egui's parser skips
+/// the spaces when a value is typed back in; the fields hold whole numbers, so the comma does not
+/// need parsing.
+pub fn german_number(value: f64, decimals: RangeInclusive<usize>) -> String {
+    let text = eframe::egui::emath::format_with_decimals_in_range(value, decimals);
+    let (integer, fraction) = text.split_once('.').unwrap_or((&text, ""));
+    let (sign, digits) = integer
+        .strip_prefix('-')
+        .map_or(("", integer), |digits| ("-", digits));
+    let mut german = format!("{sign}{}", group(digits, "\u{a0}"));
+    if !fraction.is_empty() {
+        german = format!("{german},{fraction}");
+    }
+    german
 }
 
 /// An engine error or message for the interface: in German, messages users can trigger get their
@@ -226,6 +246,16 @@ const ENGINE_PREFIXES: &[(&str, &str)] = &[
         "Die Einstellungen wurden nicht gespeichert. ",
     ),
 ];
+
+/// The English texts whose German differs, for tests that look for English on screen.
+#[cfg(test)]
+pub(super) fn english_only() -> Vec<&'static str> {
+    GERMAN
+        .iter()
+        .filter(|(english, german)| english != german)
+        .map(|(english, _)| *english)
+        .collect()
+}
 
 fn german(english: &str) -> Option<&'static str> {
     static TABLE: OnceLock<HashMap<&str, &str>> = OnceLock::new();
@@ -995,6 +1025,9 @@ mod tests {
         assert_eq!(percent(0.5, 0), "50\u{a0}%");
         assert_eq!(count(1_234_567), "1\u{a0}234\u{a0}567");
         assert_eq!(decimal(241.25, 1), "241,2");
+        assert_eq!(german_number(20000.0, 0..=0), "20\u{a0}000");
+        assert_eq!(german_number(-1234.5, 1..=1), "-1\u{a0}234,5");
+        assert_eq!(german_number(42.0, 0..=0), "42");
         assert_eq!(category_short(6), "3er-Pasch");
         set_language(Language::English);
     }

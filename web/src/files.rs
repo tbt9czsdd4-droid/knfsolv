@@ -61,7 +61,7 @@ impl WebFiles {
         };
         picker.set_value("");
         if file.size() > MAX_BYTES {
-            self.finish(Err("The file is larger than 1 MiB.".into()));
+            self.finish(Err("Die Datei ist größer als 1 MiB.".into()));
             return;
         }
         let files = self.clone();
@@ -70,7 +70,7 @@ impl WebFiles {
             files.finish(
                 text.ok()
                     .and_then(|text| text.as_string())
-                    .ok_or_else(|| "The file could not be read.".to_string()),
+                    .ok_or_else(|| "Die Datei ließ sich nicht lesen.".to_string()),
             );
         });
     }
@@ -113,7 +113,9 @@ impl Browser for WebFiles {
     fn open(&self) {
         match self.picker() {
             Ok(picker) => picker.click(),
-            Err(error) => self.finish(Err(format!("The file picker is unavailable. {error:?}"))),
+            Err(error) => self.finish(Err(format!(
+                "Die Dateiauswahl ist nicht verfügbar. {error:?}"
+            ))),
         }
     }
 
@@ -161,5 +163,5 @@ fn document() -> std::result::Result<web_sys::Document, JsValue> {
 }
 
 fn js_error(error: impl std::fmt::Debug) -> Error {
-    Error::Invalid(format!("The position could not be shared. {error:?}"))
+    Error::Invalid(format!("Die Stellung ließ sich nicht teilen. {error:?}"))
 }

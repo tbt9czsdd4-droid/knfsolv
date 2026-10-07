@@ -2427,7 +2427,7 @@ fn score_picker_is_german_in_the_web_app() {
     let shown = texts(&output);
     i18n::set_language(i18n::Language::English);
     for label in [
-        "Player 2 · Dreierpasch",
+        "Spieler 2 · Dreierpasch",
         "Offen",
         "Streichen (0)",
         "Abbrechen",
@@ -3345,4 +3345,272 @@ fn computer_turn_messages_are_german() {
             "{message}"
         );
     }
+}
+
+/// English words that never belong in the German interface. Words German shares („Name“,
+/// „Bonus“, „Chance“, „Limit“, „optional“, „die“) are left out.
+const ENGLISH_WORDS: &[&str] = &[
+    "the",
+    "and",
+    "of",
+    "to",
+    "for",
+    "with",
+    "is",
+    "are",
+    "your",
+    "you",
+    "roll",
+    "rolls",
+    "rolled",
+    "dice",
+    "score",
+    "scores",
+    "player",
+    "players",
+    "game",
+    "games",
+    "move",
+    "moves",
+    "advice",
+    "keep",
+    "kept",
+    "reroll",
+    "rerolls",
+    "analysis",
+    "analyze",
+    "open",
+    "settings",
+    "play",
+    "new",
+    "back",
+    "done",
+    "cancel",
+    "next",
+    "turn",
+    "left",
+    "none",
+    "points",
+    "total",
+    "upper",
+    "extra",
+    "win",
+    "tie",
+    "lose",
+    "first",
+    "before",
+    "enter",
+    "clear",
+    "undo",
+    "redo",
+    "file",
+    "share",
+    "position",
+    "edit",
+    "paused",
+    "computing",
+    "thinking",
+    "show",
+    "recommended",
+    "apply",
+    "suggestion",
+    "other",
+    "local",
+    "against",
+    "easy",
+    "strong",
+    "start",
+    "who",
+    "names",
+    "physical",
+    "digital",
+    "estimated",
+    "incomplete",
+    "confidence",
+    "stopped",
+    "refining",
+    "ready",
+    "locked",
+    "simulations",
+    "nodes",
+    "depth",
+    "seed",
+    "objective",
+    "method",
+    "engine",
+    "model",
+    "help",
+    "rules",
+    "finished",
+    "something",
+    "went",
+    "wrong",
+    "applied",
+    "category",
+    "sheets",
+    "forecast",
+];
+
+/// Rendered texts that look English.
+fn english_texts(output: &egui::FullOutput) -> Vec<String> {
+    let keys = i18n::english_only();
+    texts(output)
+        .into_iter()
+        .filter(|text| {
+            keys.contains(&text.as_str())
+                || text
+                    .split(|c: char| !c.is_alphabetic())
+                    .any(|word| ENGLISH_WORDS.contains(&word.to_lowercase().as_str()))
+        })
+        .collect()
+}
+
+fn assert_german(app: &mut Desktop, ctx: &egui::Context, size: [f32; 2], place: &str) {
+    render_size(app, ctx, vec![], size);
+    let output = render_size(app, ctx, vec![], size);
+    let english = english_texts(&output);
+    assert!(english.is_empty(), "{place} at {size:?}: {english:?}");
+}
+
+/// Analyzes the last request of a recorded app quickly and hands the report to the app.
+fn finish_recorded(app: &mut Desktop, recorder: &Recorder, ctx: &egui::Context, size: [f32; 2]) {
+    render_size(app, ctx, vec![], size);
+    let request = recorder.requests.borrow().last().unwrap().clone();
+    let settings = Settings {
+        method: Method::Rollout,
+        simulations: 300,
+        time_ms: 0,
+        ..request.settings.clone()
+    };
+    let report = solver::analyze(&request.position, &settings, Cancel::default()).unwrap();
+    recorder.inject(AnalysisUpdate {
+        key: request.key,
+        report: Ok(report),
+        finished: true,
+        paused: false,
+    });
+}
+
+/// An app as the web shell starts it: with a browser, so without file paths.
+fn web_app() -> Desktop {
+    let mut app = startup(Session::new(2), None);
+    app.set_browser(Box::new(FakeBrowser::default()));
+    app
+}
+
+#[test]
+fn normal_flows_show_no_english_in_german() {
+    i18n::set_language(i18n::Language::German);
+    for size in [PHONE, [874.0, 402.0], [1180.0, 900.0]] {
+        let ctx = egui::Context::default();
+        // Start and setup screens.
+        let mut app = web_app();
+        for screen in [
+            Screen::Home,
+            Screen::AnalysisSetup,
+            Screen::LocalSetup,
+            Screen::ComputerSetup,
+        ] {
+            app.navigate(screen);
+            assert_german(&mut app, &ctx, size, &format!("{screen:?}"));
+        }
+
+        // The analyzer: forecast before the roll, advice, picker, player sheet, settings.
+        let (mut app, recorder) = recorded_editor(2);
+        app.set_browser(Box::new(FakeBrowser::default()));
+        finish_recorded(&mut app, &recorder, &ctx, size);
+        assert_german(&mut app, &ctx, size, "forecast");
+        enter_roll(&mut app, [1, 1, 2, 5, 5]);
+        finish_recorded(&mut app, &recorder, &ctx, size);
+        assert_german(&mut app, &ctx, size, "advice");
+        app.edit = Some((1, 6));
+        assert_german(&mut app, &ctx, size, "picker");
+        app.edit = None;
+        app.open_player_sheet(1);
+        assert_german(&mut app, &ctx, size, "player sheet");
+        app.player_sheet = None;
+        for engine_tab in [true, false] {
+            app.show_settings = true;
+            app.engine_tab = engine_tab;
+            assert_german(&mut app, &ctx, size, "settings");
+        }
+        app.show_settings = false;
+        let best = app.report.as_ref().unwrap().best_action.unwrap();
+        app.apply(best).unwrap();
+        assert_german(&mut app, &ctx, size, "applied advice");
+        app.pending = Some(Pending::Local(app.local_setup.clone()));
+        assert_german(&mut app, &ctx, size, "replace dialog");
+        app.pending = None;
+        // Sheets that do not fit the turn order.
+        let mut next = app.game.session().clone();
+        next.position.players[1].sheet.cells[0] = Some(2);
+        next.position.players[1].sheet.cells[1] = Some(4);
+        app.commit(next);
+        assert_german(&mut app, &ctx, size, "inconsistent sheets");
+
+        // A local game with real dice, and one with app dice.
+        let mut app = web_app();
+        app.execute(Pending::Local(app.local_setup.clone()));
+        assert_german(&mut app, &ctx, size, "local game");
+        for _ in 0..5 {
+            app.choose_face(3, Instant::now());
+        }
+        app.flush_correction(Instant::now() + Duration::from_secs(5));
+        assert_german(&mut app, &ctx, size, "local game roll");
+        app.local_setup.dice_source = DiceSource::Digital;
+        app.execute(Pending::Local(app.local_setup.clone()));
+        assert_german(&mut app, &ctx, size, "app dice");
+
+        // Against the computer: the human's turn and the computer's.
+        let mut app = web_app();
+        app.computer_setup.dice_source = DiceSource::Digital;
+        app.computer_setup.computer.policy = ComputerPolicy::Greedy;
+        app.computer_setup.computer.fast_play = true;
+        app.execute(Pending::Computer(app.computer_setup.clone()));
+        assert_german(&mut app, &ctx, size, "computer game");
+        human_scores_first_open(&mut app);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.game.pending_computer_action().is_none() {
+            assert!(Instant::now() < deadline, "the computer did not decide");
+            app.tick_computer(&ctx, Instant::now());
+            app.poll();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let output = render_size(&mut app, &ctx, vec![], size);
+        let english = english_texts(&output);
+        assert!(english.is_empty(), "computer turn at {size:?}: {english:?}");
+
+        // Results.
+        let mut app = web_app();
+        app.game.replace_session(finished_game(&[20, 30])).unwrap();
+        app.session_active = true;
+        app.navigate(Screen::Play);
+        assert_german(&mut app, &ctx, size, "results");
+    }
+    i18n::set_language(i18n::Language::English);
+    // The check itself finds English.
+    let ctx = egui::Context::default();
+    let mut app = web_app();
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    assert!(!english_texts(&output).is_empty());
+}
+
+#[test]
+fn number_fields_group_thousands_in_german() {
+    let ctx = egui::Context::default();
+    let mut app = web_app();
+    app.execute(Pending::Analyze(2));
+    let mut settings = app.game.session().settings.clone();
+    settings.simulations = 20000;
+    app.engine_changed(settings);
+    app.show_settings = true;
+    app.engine_tab = true;
+    i18n::set_language(i18n::Language::German);
+    render_size(&mut app, &ctx, vec![], PHONE);
+    let german = texts(&render_size(&mut app, &ctx, vec![], PHONE));
+    i18n::set_language(i18n::Language::English);
+    render_size(&mut app, &ctx, vec![], PHONE);
+    let english = texts(&render_size(&mut app, &ctx, vec![], PHONE));
+    assert!(german.contains(&"20\u{a0}000".to_string()), "{german:?}");
+    assert!(english.contains(&"20000".to_string()), "{english:?}");
 }

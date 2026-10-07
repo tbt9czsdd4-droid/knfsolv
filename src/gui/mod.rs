@@ -82,6 +82,8 @@ pub struct Desktop {
     text_size: crate::preferences::TextSize,
     /// The zoom set from `text_size`; other zoom changes (Ctrl +/−) stay until it changes.
     applied_zoom: Option<f32>,
+    /// The language whose number format egui's style has.
+    applied_language: Option<i18n::Language>,
     show_settings: bool,
     engine_tab: bool,
     preferences: Option<crate::preferences::Preferences>,
@@ -388,6 +390,14 @@ fn pick<T: PartialEq + Copy>(
         }
     }
 }
+/// The name of a decision model, as the settings offer it.
+fn model_label(policy: Policy) -> &'static str {
+    match policy {
+        Policy::Opportunity => t("Opportunity"),
+        Policy::Greedy => t("Greedy"),
+        Policy::LegacyOpportunity => t("Legacy opportunity"),
+    }
+}
 /// The difficulty name of a computer preset.
 fn policy_label(policy: ComputerPolicy) -> &'static str {
     match policy {
@@ -541,6 +551,7 @@ impl Desktop {
             score_wheel_limits: ScoreWheelLimits::default(),
             text_size: Default::default(),
             applied_zoom: None,
+            applied_language: None,
             show_settings: false,
             engine_tab: true,
             preferences: None,
@@ -913,7 +924,13 @@ impl Desktop {
                 self.refresh_revision();
                 self.started_session("");
             }
-            Pending::Analyze(n) => self.start_editor(Session::new(n)),
+            Pending::Analyze(n) => {
+                let mut session = Session::new(n);
+                for (i, player) in session.position.players.iter_mut().enumerate() {
+                    player.name = start::player_number(i);
+                }
+                self.start_editor(session);
+            }
             Pending::AnalyzeNamed(names) => {
                 let mut session = Session::new(names.len());
                 for (player, name) in session.position.players.iter_mut().zip(names) {
@@ -1631,10 +1648,11 @@ impl Desktop {
                         Some(egui::Id::new(("model", i))),
                         &mut model,
                         &[
-                            (Policy::Opportunity, t("Opportunity")),
-                            (Policy::Greedy, t("Greedy")),
-                            (Policy::LegacyOpportunity, t("Legacy opportunity")),
-                        ],
+                            Policy::Opportunity,
+                            Policy::Greedy,
+                            Policy::LegacyOpportunity,
+                        ]
+                        .map(|policy| (policy, model_label(policy))),
                     );
                 },
             );
@@ -2467,7 +2485,10 @@ impl Desktop {
         } else {
             ui.label(tf(
                 "Model: {name}",
-                &[("name", &self.computer_setup.computer.policy.model().name())],
+                &[(
+                    "name",
+                    &model_label(self.computer_setup.computer.policy.model()),
+                )],
             ));
             ui.small(t(
                 "Presets use different decision policies, evaluated in held-out games.",
@@ -2632,6 +2653,19 @@ impl Desktop {
             // Takes effect from the next frame on.
             ui.ctx().set_zoom_factor(zoom);
             self.applied_zoom = Some(zoom);
+        }
+        let language = i18n::language();
+        if self.applied_language != Some(language) {
+            let formatter = match language {
+                i18n::Language::English => {
+                    egui::style::NumberFormatter::new(egui::emath::format_with_decimals_in_range)
+                }
+                i18n::Language::German => egui::style::NumberFormatter::new(i18n::german_number),
+            };
+            ui.ctx()
+                .all_styles_mut(|style| style.number_formatter = formatter.clone());
+            ui.style_mut().number_formatter = formatter;
+            self.applied_language = Some(language);
         }
         self.poll();
         self.poll_opened();
