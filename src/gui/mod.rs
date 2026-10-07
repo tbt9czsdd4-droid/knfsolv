@@ -326,6 +326,33 @@ fn primary_button(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Respon
     )
 }
 
+/// Margins that make a single-line text field 44 points tall for touch.
+fn touch_field_margin(ui: &egui::Ui) -> egui::Vec2 {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let row = ui.fonts_mut(|f| f.row_height(&font));
+    egui::vec2(8.0, ((44.0 - row) / 2.0).max(4.0))
+}
+/// The difficulty name of a computer preset.
+fn policy_label(policy: ComputerPolicy) -> &'static str {
+    match policy {
+        ComputerPolicy::Greedy => t("Easy"),
+        ComputerPolicy::LegacyOpportunity => t("Standard"),
+        ComputerPolicy::ContinuationV2 => t("Strong"),
+    }
+}
+/// Light, dark, or system appearance; egui's own buttons are English only.
+fn theme_buttons(ui: &mut egui::Ui) {
+    let mut theme = ui.ctx().options(|o| o.theme_preference);
+    let before = theme;
+    ui.horizontal(|ui| {
+        ui.selectable_value(&mut theme, egui::ThemePreference::System, t("💻 System"));
+        ui.selectable_value(&mut theme, egui::ThemePreference::Light, t("☀ Light"));
+        ui.selectable_value(&mut theme, egui::ThemePreference::Dark, t("🌙 Dark"));
+    });
+    if theme != before {
+        ui.ctx().set_theme(theme);
+    }
+}
 fn objective_label(objective: Objective) -> &'static str {
     match objective {
         Objective::SharedFirst => "Shared-first utility (ties split credit)",
@@ -491,9 +518,7 @@ impl Desktop {
         let players = session.position.players.len();
         let mut app = Self::with_computation(session, path, computation);
         app.analysis_players = players;
-        app.local_setup.names = (0..players.clamp(2, 8))
-            .map(|i| format!("Player {}", i + 1))
-            .collect();
+        app.local_setup.names = (0..players.clamp(2, 8)).map(start::player_number).collect();
         if show_home {
             app.screen = Screen::Home;
             app.session_active = false;
@@ -522,6 +547,7 @@ impl Desktop {
     fn install_preferences(&mut self, p: crate::preferences::Preferences) {
         self.local_setup = p.local.clone();
         self.computer_setup = p.computer.clone();
+        self.localize_default_names();
         self.custom_search = p.custom_search;
         self.custom_settings = p.custom_settings.clone();
         self.analysis_players = p.analysis_players;
@@ -574,10 +600,41 @@ impl Desktop {
             }
         }
     }
+    /// Default names saved in English ("Player 2", "You") follow the interface language.
+    fn localize_default_names(&mut self) {
+        for (i, name) in self.local_setup.names.iter_mut().enumerate() {
+            if *name == format!("Player {}", i + 1) {
+                *name = start::player_number(i);
+            }
+        }
+        if self.computer_setup.human_name == "You" {
+            self.computer_setup.human_name = t("You").into();
+        }
+    }
     fn navigate(&mut self, screen: Screen) {
         if screen != Screen::Play && self.game.control() == PlayerControl::Computer {
             self.game.invalidate_jobs();
             self.refresh_revision();
+        }
+        // The phone setups start from the names saved last time unless names were typed already.
+        if self.setup_names.iter().all(|name| name.trim().is_empty()) {
+            match screen {
+                Screen::LocalSetup => {
+                    self.setup_names = (self.local_setup.names.iter().enumerate())
+                        .map(|(i, name)| {
+                            if *name == start::player_number(i) {
+                                String::new()
+                            } else {
+                                name.clone()
+                            }
+                        })
+                        .collect();
+                }
+                Screen::ComputerSetup if self.computer_setup.human_name != t("You") => {
+                    self.setup_names = vec![self.computer_setup.human_name.clone()];
+                }
+                _ => {}
+            }
         }
         self.screen = screen;
         self.show_settings = false;
@@ -2042,18 +2099,18 @@ impl Desktop {
     fn setup_ui(&mut self, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical().id_salt("setup").show(ui, |ui| {
             ui.heading("Kniffel");
-            ui.label("Standard rules · two rerolls per turn · 13 scoring categories");
+            ui.label(t("Standard rules · two rerolls per turn · 13 scoring categories"));
             ui.add_space(12.0);
             if self.screen == Screen::Home {
-                ui.heading("Choose how to play");
-                if ui.add_sized([220.0, 40.0], egui::Button::new("Local game")).clicked() {
+                ui.heading(t("Choose how to play"));
+                if ui.add_sized([220.0, 40.0], egui::Button::new(t("Local game"))).clicked() {
                     self.navigate(Screen::LocalSetup);
                 }
-                ui.small("2–8 people sharing a score sheet, with physical or digital dice.");
-                if ui.add_sized([220.0, 40.0], egui::Button::new("Play computer")).clicked() {
+                ui.small(t("2–8 people sharing a score sheet, with physical or digital dice."));
+                if ui.add_sized([220.0, 40.0], egui::Button::new(t("Play computer"))).clicked() {
                     self.navigate(Screen::ComputerSetup);
                 }
-                if ui.add_sized([220.0, 40.0], egui::Button::new("Analyze a position")).clicked() {
+                if ui.add_sized([220.0, 40.0], egui::Button::new(t("Analyze a position"))).clicked() {
                     self.navigate(Screen::AnalysisSetup);
                 }
                 ui.separator();
@@ -2069,28 +2126,28 @@ impl Desktop {
                     }
                 }
             } else if self.screen == Screen::LocalSetup {
-                ui.heading("Local game");
+                ui.heading(t("Local game"));
                 let mut count = self.local_setup.names.len();
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Players");
+                    ui.label(t("Players"));
                     for n in 2..=8 {
                         ui.selectable_value(&mut count, n, n.to_string());
                     }
                 });
                 for i in self.local_setup.names.len()..count {
-                    self.local_setup.names.push(format!("Player {}", i + 1));
+                    self.local_setup.names.push(start::player_number(i));
                 }
                 self.local_setup.names.truncate(count);
                 for (i, name) in self.local_setup.names.iter_mut().enumerate() {
                     ui.horizontal(|ui| {
-                        ui.label(format!("Player {}", i + 1));
+                        ui.label(start::player_number(i));
                         ui.add(egui::TextEdit::singleline(name).id_salt(("setup_name", i))
-                            .hint_text(format!("Player {}", i + 1)).desired_width(220.0).char_limit(60));
+                            .hint_text(start::player_number(i)).desired_width(220.0).char_limit(60));
                     });
                 }
                 self.local_setup.starting_player = self.local_setup.starting_player.min(count - 1);
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Starting player");
+                    ui.label(t("Starting player"));
                     egui::ComboBox::from_id_salt("setup_starting_player")
                         .selected_text(format!("{}. {}", self.local_setup.starting_player + 1,
                             self.local_setup.names[self.local_setup.starting_player]))
@@ -2100,55 +2157,55 @@ impl Desktop {
                             }
                         });
                 });
-                ui.small("Play follows the listed order, wrapping around from the starting player.");
+                ui.small(t("Play follows the listed order, wrapping around from the starting player."));
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Dice");
-                    ui.selectable_value(&mut self.local_setup.dice_source, DiceSource::Physical, "Physical dice");
-                    ui.selectable_value(&mut self.local_setup.dice_source, DiceSource::Digital, "Digital dice");
+                    ui.label(t("Dice"));
+                    ui.selectable_value(&mut self.local_setup.dice_source, DiceSource::Physical, t("Physical dice"));
+                    ui.selectable_value(&mut self.local_setup.dice_source, DiceSource::Digital, t("Digital dice"));
                 });
                 ui.label(match self.local_setup.dice_source {
-                    DiceSource::Physical => "Roll your own dice, then enter their faces with the palette or keys 1–6.",
-                    DiceSource::Digital => "Click Roll when you are ready. The app generates the dice.",
+                    DiceSource::Physical => t("Roll your own dice, then enter their faces with the palette or keys 1–6."),
+                    DiceSource::Digital => t("Click Roll when you are ready. The app generates the dice."),
                 });
                 let validation = self.local_setup.session(0);
                 if let Err(e) = &validation {
                     ui.colored_label(ui.visuals().error_fg_color, e.to_string());
                 }
-                if ui.add_enabled(validation.is_ok(), egui::Button::new("Start local game").min_size(egui::vec2(180.0, 36.0))).clicked() {
+                if ui.add_enabled(validation.is_ok(), egui::Button::new(t("Start local game")).min_size(egui::vec2(180.0, 36.0))).clicked() {
                     self.request(Pending::Local(self.local_setup.clone()));
                 }
             } else if self.screen == Screen::ComputerSetup {
                 self.computer_setup_ui(ui);
             } else {
-                ui.heading("Analyze a position");
-                ui.label("Start with empty sheets, then edit any scores, enter dice, and set the active player.");
+                ui.heading(t("Analyze a position"));
+                ui.label(t("Start with empty sheets, then edit any scores, enter dice, and set the active player."));
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Players");
+                    ui.label(t("Players"));
                     for n in 1..=8 {
                         ui.selectable_value(&mut self.analysis_players, n, n.to_string());
                     }
                 });
-                if ui.button("Open position editor").clicked() {
+                if ui.button(t("Open position editor")).clicked() {
                     self.request(Pending::Analyze(self.analysis_players));
                 }
             }
             ui.separator();
             ui.horizontal_wrapped(|ui| {
-                if self.screen != Screen::Home && ui.button("Back").clicked() {
+                if self.screen != Screen::Home && ui.button(t("Back")).clicked() {
                     self.navigate(Screen::Home);
                 }
-                if self.session_active && ui.button("Return to session").clicked() {
+                if self.session_active && ui.button(t("Return to session")).clicked() {
                     self.navigate(Screen::Play);
                 }
             });
             ui.label(&self.message);
-            egui::widgets::global_theme_preference_buttons(ui);
+            theme_buttons(ui);
         });
     }
     fn computer_setup_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Play computer");
+        ui.heading(t("Play computer"));
         ui.horizontal(|ui| {
-            ui.label("Your name");
+            ui.label(t("Your name"));
             ui.add(
                 egui::TextEdit::singleline(&mut self.computer_setup.human_name)
                     .desired_width(180.0)
@@ -2156,7 +2213,7 @@ impl Desktop {
             );
         });
         ui.horizontal(|ui| {
-            ui.label("Computer name");
+            ui.label(t("Computer name"));
             ui.add(
                 egui::TextEdit::singleline(&mut self.computer_setup.computer_name)
                     .desired_width(180.0)
@@ -2164,32 +2221,32 @@ impl Desktop {
             );
         });
         ui.horizontal_wrapped(|ui| {
-            ui.label("Starts");
-            ui.selectable_value(&mut self.computer_setup.human_starts, true, "You first");
+            ui.label(t("Starts"));
+            ui.selectable_value(&mut self.computer_setup.human_starts, true, t("You first"));
             ui.selectable_value(
                 &mut self.computer_setup.human_starts,
                 false,
-                "Computer first",
+                t("Computer first"),
             );
         });
         ui.horizontal_wrapped(|ui| {
-            ui.label("Your dice");
+            ui.label(t("Your dice"));
             ui.selectable_value(
                 &mut self.computer_setup.dice_source,
                 DiceSource::Physical,
-                "Physical dice",
+                t("Physical dice"),
             );
             ui.selectable_value(
                 &mut self.computer_setup.dice_source,
                 DiceSource::Digital,
-                "Digital dice",
+                t("Digital dice"),
             );
         });
-        ui.small(
+        ui.small(t(
             "Computer rolls are always generated by the app. Your digital rolls wait for Roll.",
-        );
+        ));
         ui.horizontal_wrapped(|ui| {
-            ui.label("Difficulty");
+            ui.label(t("Difficulty"));
             for policy in [
                 ComputerPolicy::Greedy,
                 ComputerPolicy::LegacyOpportunity,
@@ -2198,7 +2255,7 @@ impl Desktop {
                 if ui
                     .selectable_label(
                         !self.custom_search && self.computer_setup.computer.policy == policy,
-                        policy.label(),
+                        policy_label(policy),
                     )
                     .clicked()
                 {
@@ -2207,29 +2264,29 @@ impl Desktop {
                 }
             }
             if ui
-                .selectable_label(self.custom_search, "Custom search")
+                .selectable_label(self.custom_search, t("Custom search"))
                 .clicked()
             {
                 self.custom_search = true;
             }
         });
         if self.custom_search {
-            ui.label("Custom search · strength uncalibrated. More thinking does not guarantee stronger play.");
-            ui.small("Continuation-v2 baseline with bounded MCTS and independent validation. Coaching approximates it with the baseline.");
+            ui.label(t("Custom search · strength uncalibrated. More thinking does not guarantee stronger play."));
+            ui.small(t("Continuation-v2 baseline with bounded MCTS and independent validation. Coaching approximates it with the baseline."));
             egui::Grid::new("computer_budgets").show(ui, |ui| {
-                ui.label("Time (ms; 0 = unlimited)");
+                ui.label(t("Time (ms; 0 = unlimited)"));
                 ui.add(egui::DragValue::new(&mut self.custom_settings.time_ms).range(0..=120_000));
                 ui.end_row();
-                ui.label("Simulations");
+                ui.label(t("Simulations"));
                 ui.add(
                     egui::DragValue::new(&mut self.custom_settings.simulations)
                         .range(1..=1_000_000_000),
                 );
                 ui.end_row();
-                ui.label("Depth (0 = unlimited)");
+                ui.label(t("Depth (0 = unlimited)"));
                 ui.add(egui::DragValue::new(&mut self.custom_settings.max_depth).range(0..=100));
                 ui.end_row();
-                ui.label("Nodes");
+                ui.label(t("Nodes"));
                 ui.add(
                     egui::DragValue::new(&mut self.custom_settings.max_nodes).range(1..=1_000_000),
                 );
@@ -2237,16 +2294,21 @@ impl Desktop {
             });
             ui.checkbox(
                 &mut self.custom_settings.conservative_advice,
-                "Conservative advice",
+                t("Conservative advice"),
             );
             self.computer_setup.computer.policy = ComputerPolicy::ContinuationV2;
             self.computer_setup.computer.search = Some(self.custom_settings.clone());
         } else {
-            ui.label(self.computer_setup.computer.policy.model().name());
-            ui.small("Presets use different decision policies, evaluated in held-out games.");
+            ui.label(tf(
+                "Model: {name}",
+                &[("name", &self.computer_setup.computer.policy.model().name())],
+            ));
+            ui.small(t(
+                "Presets use different decision policies, evaluated in held-out games.",
+            ));
             self.computer_setup.computer.search = None;
         }
-        ui.checkbox(&mut self.computer_setup.computer.fast_play, "Fast play");
+        ui.checkbox(&mut self.computer_setup.computer.fast_play, t("Fast play"));
         let validation = self.computer_setup.session(0);
         if let Err(error) = &validation {
             ui.label(error.to_string());
@@ -2254,7 +2316,7 @@ impl Desktop {
         if ui
             .add_enabled(
                 validation.is_ok(),
-                egui::Button::new("Start computer game").min_size(egui::vec2(180.0, 36.0)),
+                egui::Button::new(t("Start computer game")).min_size(egui::vec2(180.0, 36.0)),
             )
             .clicked()
         {
@@ -2266,21 +2328,26 @@ impl Desktop {
             return;
         };
         egui::ScrollArea::vertical().id_salt("results").show(ui, |ui| {
-            ui.heading("Game finished");
+            ui.heading(t("Game finished"));
             let winners: Vec<_> = results.iter().filter(|r| r.winner).map(|r| r.name.as_str()).collect();
-            ui.heading(format!("{}: {}", if winners.len() == 1 { "Winner" } else { "Tied winners" }, winners.join(", ")));
+            let names = winners.join(", ");
+            ui.heading(if winners.len() == 1 {
+                tf("Winner: {names}", &[("names", &names)])
+            } else {
+                tf("Tied winners: {names}", &[("names", &names)])
+            });
             ui.horizontal_wrapped(|ui| {
-                if ui.button("New game").clicked() {
+                if ui.button(t("New game")).clicked() {
                     self.navigate(Screen::Home);
                 }
-                if ui.button("Review score sheets").clicked() {
+                if ui.button(t("Review score sheets")).clicked() {
                     self.review_results = true;
                 }
             });
-            ui.label("Totals include the upper bonus and extra Kniffel points. Undo restores the last scoring decision.");
+            ui.label(t("Totals include the upper bonus and extra Kniffel points. Undo restores the last scoring decision."));
             egui::ScrollArea::horizontal().id_salt("result_columns").show(ui, |ui| {
                 egui::Grid::new("final_totals").striped(true).show(ui, |ui| {
-                    for label in ["Player", "Upper subtotal", "Upper bonus", "Extra points", "TOTAL", "Result"] {
+                    for label in [t("Player"), t("Upper subtotal"), t("Upper bonus"), t("Extra points"), t("TOTAL"), t("Result")] {
                         ui.strong(label);
                     }
                     ui.end_row();
@@ -2290,7 +2357,7 @@ impl Desktop {
                         ui.label(result.bonus.to_string());
                         ui.label(result.extra_points.to_string());
                         ui.strong(result.total.to_string());
-                        ui.label(if result.winner { "Winner" } else { "" });
+                        ui.label(if result.winner { t("Winner") } else { "" });
                         ui.end_row();
                     }
                 });
@@ -2427,6 +2494,8 @@ impl Desktop {
                 match self.screen {
                     Screen::Home if phone => self.phone_start_ui(ui),
                     Screen::AnalysisSetup if phone => self.phone_players_ui(ui),
+                    Screen::LocalSetup if phone => self.phone_local_ui(ui),
+                    Screen::ComputerSetup if phone => self.phone_computer_ui(ui),
                     _ => self.setup_ui(ui),
                 }
                 return;
@@ -2460,7 +2529,7 @@ impl Desktop {
                 if !self.review_results {
                     self.results_ui(ui);
                 } else {
-                    if ui.button("Show results").clicked() {
+                    if ui.button(t("Show results")).clicked() {
                         self.review_results = false;
                     }
                     egui::ScrollArea::vertical()
@@ -2522,7 +2591,7 @@ impl Desktop {
                 .default_width(540.0)
                 .vscroll(true)
                 .show(&ctx, |ui| {
-                    egui::widgets::global_theme_preference_buttons(ui);
+                    theme_buttons(ui);
                     ui.horizontal(|ui| {
                         ui.selectable_value(&mut self.engine_tab, true, "Engine");
                         ui.selectable_value(&mut self.engine_tab, false, "Game");

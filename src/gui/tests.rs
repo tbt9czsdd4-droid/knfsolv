@@ -3049,3 +3049,181 @@ fn picker_and_player_sheet_fit(size: [f32; 2]) {
         );
     }
 }
+
+#[test]
+fn phone_local_setup_starts_a_game_with_optional_names() {
+    let ctx = egui::Context::default();
+    let mut app = startup(Session::new(2), None);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    click_size(&mut app, &ctx, label_center(&output, "Local game"), PHONE);
+    assert_eq!(app.screen, Screen::LocalSetup);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    assert!(texts(&output).contains(&"How many are playing?".to_string()));
+    click_size(&mut app, &ctx, label_center(&output, "3"), PHONE);
+    render_size(&mut app, &ctx, vec![], PHONE);
+    app.setup_names[1] = " Anna ".into();
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    click_size(&mut app, &ctx, label_center(&output, "Anna"), PHONE);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    click_size(
+        &mut app,
+        &ctx,
+        label_center(&output, "The app rolls"),
+        PHONE,
+    );
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    click_size(&mut app, &ctx, label_center(&output, "Start"), PHONE);
+    assert_eq!(app.screen, Screen::Play);
+    let position = &app.game.session().position;
+    let names: Vec<_> = position.players.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["Player 1", "Anna", "Player 3"]);
+    assert_eq!(position.active_player, 1);
+    assert_eq!(position.turn_order, [1, 2, 0]);
+    assert_eq!(app.game.dice_source(), DiceSource::Digital);
+    // The names are remembered for the next setup.
+    assert_eq!(app.local_setup.names, names);
+    app.setup_names.clear();
+    app.navigate(Screen::LocalSetup);
+    assert_eq!(app.setup_names, ["", "Anna", ""]);
+}
+
+#[test]
+fn phone_computer_setup_uses_the_shared_name_and_presets() {
+    let ctx = egui::Context::default();
+    let mut app = startup(Session::new(2), None);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    click_size(
+        &mut app,
+        &ctx,
+        label_center(&output, "Against the computer"),
+        PHONE,
+    );
+    assert_eq!(app.screen, Screen::ComputerSetup);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    click_size(&mut app, &ctx, label_center(&output, "Computer"), PHONE);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    click_size(&mut app, &ctx, label_center(&output, "Easy"), PHONE);
+    assert_eq!(app.computer_setup.computer.policy, ComputerPolicy::Greedy);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    click_size(&mut app, &ctx, label_center(&output, "Start"), PHONE);
+    assert_eq!(app.screen, Screen::Play);
+    let position = &app.game.session().position;
+    let names: Vec<_> = position.players.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["You", "Computer"]);
+    assert_eq!(position.active_player, 1);
+    assert_eq!(app.game.control(), PlayerControl::Computer);
+    // A name typed in „Wer spielt mit?“ is the human's name here too.
+    app.setup_names = vec!["Eva".into()];
+    app.navigate(Screen::ComputerSetup);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    click_size(&mut app, &ctx, label_center(&output, "Start"), PHONE);
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    click_size(
+        &mut app,
+        &ctx,
+        label_center(&output, "Discard and continue"),
+        PHONE,
+    );
+    assert_eq!(app.game.session().position.players[0].name, "Eva");
+}
+
+fn finished_game(totals: &[u16]) -> Session {
+    let names = ["Ada", "Ben", "Cleo", "Dan"];
+    let mut session = LocalGameConfig {
+        names: names[..totals.len()]
+            .iter()
+            .map(|n| n.to_string())
+            .collect(),
+        ..Default::default()
+    }
+    .session(1)
+    .unwrap();
+    for (p, &total) in session.position.players.iter_mut().zip(totals) {
+        p.sheet.cells = [Some(0); 13];
+        p.sheet.cells[12] = Some(total);
+    }
+    session.position.phase = Phase::Finished;
+    session
+}
+
+#[test]
+fn phone_results_rank_players_and_start_a_new_game() {
+    i18n::set_language(i18n::Language::German);
+    let size = PHONE_SIZES[0];
+    let ctx = egui::Context::default();
+    let mut app = startup(Session::new(2), None);
+    app.game
+        .replace_session(finished_game(&[20, 30, 30]))
+        .unwrap();
+    app.navigate(Screen::Play);
+    app.session_active = true;
+    render_size(&mut app, &ctx, vec![], size);
+    let output = render_size(&mut app, &ctx, vec![], size);
+    let shown = texts(&output);
+    i18n::set_language(i18n::Language::English);
+    for text in [
+        "Spiel beendet",
+        "Gleichstand: Ben, Cleo",
+        "30 Punkte",
+        "20 Punkte",
+    ] {
+        assert!(
+            shown.contains(&text.to_string()),
+            "{text} missing: {shown:?}"
+        );
+    }
+    let place = |name: &str| shown.iter().position(|t| t == name).unwrap();
+    assert!(place("Ben") < place("Ada") && place("Cleo") < place("Ada"));
+    assert_eq!(cut_off_shapes(&output), 0);
+    assert!(small_targets(&ctx, size).is_empty());
+    i18n::set_language(i18n::Language::German);
+    let output = render_size(&mut app, &ctx, vec![], size);
+    let button = label_center(&output, "Neues Spiel");
+    click_size(&mut app, &ctx, button, size);
+    i18n::set_language(i18n::Language::English);
+    assert_eq!(app.screen, Screen::Home);
+}
+
+#[test]
+fn phone_setup_screens_fit_every_supported_size_in_german() {
+    i18n::set_language(i18n::Language::German);
+    for size in PHONE_SIZES {
+        let ctx = egui::Context::default();
+        let mut app = startup(Session::new(2), None);
+        for screen in [
+            Screen::Home,
+            Screen::AnalysisSetup,
+            Screen::LocalSetup,
+            Screen::ComputerSetup,
+        ] {
+            app.navigate(screen);
+            render_size(&mut app, &ctx, vec![], size);
+            let output = render_size(&mut app, &ctx, vec![], size);
+            assert_eq!(cut_off_shapes(&output), 0, "{screen:?} {size:?}");
+            let small = small_targets(&ctx, size);
+            assert!(small.is_empty(), "{screen:?} {size:?}: {small:?}");
+        }
+    }
+    i18n::set_language(i18n::Language::English);
+}
+
+#[test]
+fn default_names_follow_the_interface_language() {
+    i18n::set_language(i18n::Language::German);
+    let app = startup(Session::new(3), None);
+    use crate::persistence::Storage;
+    let stored = crate::persistence::MemoryStorage::default();
+    let mut saved = crate::preferences::Preferences::default();
+    saved.local.names = vec!["Player 1".into(), "Anna".into()];
+    stored
+        .write(&serde_json::to_string(&saved).unwrap())
+        .unwrap();
+    let loaded = Desktop::startup_with(Session::new(2), None, stored, native_worker);
+    i18n::set_language(i18n::Language::English);
+    assert_eq!(
+        app.local_setup.names,
+        ["Spieler 1", "Spieler 2", "Spieler 3"]
+    );
+    assert_eq!(app.computer_setup.human_name, "Du");
+    assert_eq!(loaded.local_setup.names, ["Spieler 1", "Anna"]);
+}

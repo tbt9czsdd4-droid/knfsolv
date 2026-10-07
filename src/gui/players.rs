@@ -101,7 +101,7 @@ impl Desktop {
                 let mut field = egui::TextEdit::singleline(&mut draft.name)
                     .char_limit(30)
                     .desired_width(width)
-                    .margin(egui::vec2(8.0, 12.0))
+                    .margin(super::touch_field_margin(ui))
                     .show(ui);
                 // Until the name is changed, it stays selected, so typing replaces a default
                 // like "Player 2" (a tap's release would otherwise place the cursor).

@@ -1,6 +1,6 @@
 # iPhone web app plan
 
-Status: Phases 0–4 done (2026-10-07; Pages deployment postponed; the family test of Phase 4 is still open). This replaces the earlier draft (commit `edcef33`).
+Status: Phases 0–4 done (2026-10-07; Pages deployment postponed; the family test of Phase 4 is still open); Phase 5 in progress (step 1 of 5 done). This replaces the earlier draft (commit `edcef33`).
 Sources: [the brainstorm](iphone-web-app-brainstorm.md), code inspection, and measurements taken on 2026-10-04 (section 3).
 
 ## 1. Goal
@@ -432,6 +432,13 @@ Estimates are focused working days. Each phase ends with something testable on t
 - Use German number formatting.
 
 **Done when:** no English is visible in normal flows (only under *Technische Details*), and the missing-translation test passes.
+
+**Status (2026-10-07): in progress, in five steps, each committed as "Phase 5.N" and reported before the next one starts.** "Normal flows" include the desktop layout, which the web app shows from 600 points on (iPad, a phone held sideways).
+1. Done: setup and results screens. Below 600 points, „Lokales Spiel“ (2–8 players, optional names, „Wer fängt an?“, *Echte Würfel* / *Die App würfelt*) and „Gegen den Computer“ (your name, who starts, your dice, *Leicht* / *Mittel* / *Stark*) have phone screens in the style of „Wer spielt mit?“. Names typed once carry over between the three setups, and the names of the last local game come back. A finished game shows the standings, best first, with *Neues Spiel*. The desktop setup and results screens and the theme buttons go through `t()`; default names follow the language („Spieler 2“, „Du“), including names saved in English. Text fields on phone screens are 44 points tall, player columns grow up to 90 points when there is room (so „Computer“ fits), and with app dice the advice area says „Würfle, dann gibt es einen Rat.“
+2. Desktop layout: toolbar, dice panel, score sheets, advice, dialogs.
+3. Settings (*Erweitert …*) and messages: controller and computer messages, and errors users can trigger (a German sentence, the original under *Technische Details*).
+4. German number formatting everywhere, and a rendering test that looks for English in normal flows.
+5. *Hilfe & Regeln* with the QR code; documentation.
 
 ### Phase 6 — Install and offline (1–2 days)
 

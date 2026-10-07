@@ -7,7 +7,7 @@ use super::{
     small_die,
 };
 use crate::{
-    game::{AnalysisMode, PlayerControl},
+    game::{AnalysisMode, DiceSource, PlayerControl},
     rules::{self, Action},
     solver::{Alternative, Metrics, Report},
     state::Phase,
@@ -18,7 +18,10 @@ use web_time::Instant;
 pub(super) const PHONE_WIDTH: f32 = 600.0;
 const TARGET: f32 = 44.0;
 const LABEL_WIDTH: f32 = 72.0;
+/// Player columns are at least this wide, so four players fit at 375 points; with fewer players
+/// they grow up to [`WIDE_COLUMN`] so names like „Computer“ fit.
 const COLUMN_WIDTH: f32 = 52.0;
+const WIDE_COLUMN: f32 = 90.0;
 
 /// How long each position is analyzed, as offered in the menu.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -71,7 +74,7 @@ impl Desktop {
                     ui.small(&self.message);
                 }
                 if self.game.session().position.phase == Phase::Finished && !self.game.editing() {
-                    self.results_ui(ui);
+                    self.phone_results(ui);
                 } else {
                     self.phone_dice(ui);
                     ui.separator();
@@ -80,6 +83,48 @@ impl Desktop {
                 ui.separator();
                 self.phone_sheet(ui);
             });
+    }
+
+    /// The final standings, best first; the sheets follow below.
+    fn phone_results(&mut self, ui: &mut egui::Ui) {
+        let Some(mut results) = self.game.results() else {
+            return;
+        };
+        ui.heading(t("Game finished"));
+        let winners: Vec<&str> = (results.iter().filter(|r| r.winner))
+            .map(|r| r.name.as_str())
+            .collect();
+        ui.strong(match winners[..] {
+            [name] => tf("{name} wins", &[("name", &name)]),
+            _ => tf("Tie: {names}", &[("names", &winners.join(", "))]),
+        });
+        results.sort_by_key(|r| std::cmp::Reverse(r.total));
+        for (place, result) in results.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(format!("{}.", place + 1));
+                ui.strong(&result.name);
+                if result.winner {
+                    ui.label("🏆");
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.strong(tf("{points} points", &[("points", &result.total)]));
+                });
+            });
+            ui.small(tf(
+                "Upper section {upper} · bonus {bonus} · extra Kniffels {extra}",
+                &[
+                    ("upper", &result.upper),
+                    ("bonus", &result.bonus),
+                    ("extra", &result.extra_points),
+                ],
+            ));
+        }
+        let new_game =
+            egui::Button::new(t("New game")).min_size(egui::vec2(ui.available_width(), TARGET));
+        if ui.add(new_game).clicked() {
+            self.navigate(super::Screen::Home);
+        }
+        ui.small(t("↺ takes back the last entry."));
     }
 
     fn phone_top_bar(&mut self, ui: &mut egui::Ui) {
@@ -477,6 +522,8 @@ impl Desktop {
                 self.who_is_up_ui(ui);
             } else if self.game.session().position.phase == Phase::Finished {
                 ui.label(t("Game finished"));
+            } else if self.game.dice_source() == DiceSource::Digital {
+                ui.label(t("Roll the dice for advice."));
             } else {
                 ui.label(t("Enter all five dice for advice."));
             }
@@ -719,6 +766,10 @@ impl Desktop {
         ui.horizontal_top(|ui| {
             // Rows of 44-point cells with a small gap, so neighboring cells stay distinct.
             ui.spacing_mut().item_spacing = egui::vec2(4.0, 2.0);
+            let gap = ui.spacing().item_spacing.x;
+            let free = ui.available_width() - LABEL_WIDTH - gap;
+            let width = ((free - gap * (players - 1) as f32) / players as f32)
+                .clamp(COLUMN_WIDTH, WIDE_COLUMN);
             ui.vertical(|ui| {
                 ui.set_width(LABEL_WIDTH);
                 row(ui, "", false);
@@ -736,8 +787,8 @@ impl Desktop {
                     ui.horizontal_top(|ui| {
                         for player in 0..players {
                             ui.vertical(|ui| {
-                                ui.set_width(COLUMN_WIDTH);
-                                self.phone_column(ui, player, misfits.contains(&player));
+                                ui.set_width(width);
+                                self.phone_column(ui, player, width, misfits.contains(&player));
                             });
                         }
                     });
@@ -745,13 +796,13 @@ impl Desktop {
         });
     }
 
-    fn phone_column(&mut self, ui: &mut egui::Ui, player: usize, misfit: bool) {
+    fn phone_column(&mut self, ui: &mut egui::Ui, player: usize, width: f32, misfit: bool) {
         let position = self.game.session().position.clone();
         let sheet = position.players[player].sheet;
         let rolling = player == position.active_player && position.phase != Phase::Finished;
         let cell = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {
             ui.allocate_ui_with_layout(
-                egui::vec2(COLUMN_WIDTH, TARGET),
+                egui::vec2(width, TARGET),
                 egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
                 |ui| add(ui),
             );
