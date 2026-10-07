@@ -85,17 +85,22 @@ impl Desktop {
         let valid = sheet.validate().is_ok();
         let mut apply = false;
         let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        // A fixed width keeps the separator from stretching the window to the screen's edges;
+        // on narrow screens it leaves a gutter of about 16 points on each side.
+        let width = (ctx.content_rect().width() - 48.0).clamp(200.0, 280.0);
         egui::Window::new(t("Player"))
             .id(egui::Id::new("player_sheet"))
             .collapsible(false)
             .resizable(false)
+            .min_width(width)
+            .max_width(width)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
                 ui.label(t("Name"));
                 let mut field = egui::TextEdit::singleline(&mut draft.name)
                     .char_limit(30)
-                    .desired_width(260.0)
+                    .desired_width(width)
                     .margin(egui::vec2(8.0, 12.0))
                     .show(ui);
                 // Until the name is changed, it stays selected, so typing replaces a default
@@ -108,7 +113,10 @@ impl Desktop {
                     field.state.cursor.set_char_range(Some(all));
                     field.state.store(ui.ctx(), field.response.id);
                 }
-                ui.label(t("Extra Kniffels"));
+                ui.horizontal(|ui| {
+                    ui.label(t("Extra Kniffels"));
+                    ui.small(t("50 points each"));
+                });
                 ui.horizontal(|ui| {
                     if wide_button(ui, "−", draft.extra_kniffels > 0) {
                         draft.extra_kniffels -= 1;
@@ -117,7 +125,6 @@ impl Desktop {
                     if wide_button(ui, "+", draft.extra_kniffels < 12) {
                         draft.extra_kniffels += 1;
                     }
-                    ui.small(t("50 points each"));
                 });
                 if !valid {
                     ui.colored_label(
@@ -125,15 +132,19 @@ impl Desktop {
                         t("Extra Kniffels need 50 points in Kniffel and enough filled rows."),
                     );
                 }
-                ui.label(t("Turn order"));
+                // The place is part of the heading, so the buttons fit next to each other even
+                // in German on a 312-point screen.
+                ui.horizontal(|ui| {
+                    ui.label(t("Turn order"));
+                    ui.strong(tf(
+                        "Place {place} of {count}",
+                        &[("place", &(draft.place + 1)), ("count", &players)],
+                    ));
+                });
                 ui.horizontal(|ui| {
                     if wide_button(ui, t("Earlier"), draft.place > 0) {
                         draft.place -= 1;
                     }
-                    ui.label(tf(
-                        "Place {place} of {count}",
-                        &[("place", &(draft.place + 1)), ("count", &players)],
-                    ));
                     if wide_button(ui, t("Later"), draft.place + 1 < players) {
                         draft.place += 1;
                     }

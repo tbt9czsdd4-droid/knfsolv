@@ -2893,3 +2893,159 @@ fn text_size_zooms_the_interface_and_is_remembered() {
     render_size(&mut app, &ctx, vec![], PHONE);
     assert_eq!(ctx.zoom_factor(), 1.5);
 }
+
+/// The four phone sizes of the plan; 312×675 is a 390-point iPhone with large text.
+const PHONE_SIZES: [[f32; 2]; 4] = [
+    [312.0, 675.0],
+    [375.0, 667.0],
+    [390.0, 844.0],
+    [430.0, 932.0],
+];
+
+/// An analyzer with `players` players, a roll, and finished advice, rendered at `size`.
+fn phone_analyzer(players: usize, size: [f32; 2]) -> (Desktop, egui::Context, egui::FullOutput) {
+    let ctx = egui::Context::default();
+    let (mut app, recorder) = recorded_editor(players);
+    enter_roll(&mut app, [1, 1, 2, 5, 5]);
+    render_size(&mut app, &ctx, vec![], size);
+    let request = recorder.requests.borrow().last().unwrap().clone();
+    let settings = Settings {
+        method: Method::Rollout,
+        simulations: 300,
+        time_ms: 0,
+        ..request.settings.clone()
+    };
+    let report = solver::analyze(&request.position, &settings, Cancel::default()).unwrap();
+    recorder.inject(AnalysisUpdate {
+        key: request.key,
+        report: Ok(report),
+        finished: true,
+        paused: false,
+    });
+    render_size(&mut app, &ctx, vec![], size);
+    let output = render_size(&mut app, &ctx, vec![], size);
+    (app, ctx, output)
+}
+
+/// Texts and boxes (buttons, frames) drawn wider than the area that shows them, i.e. cut off at
+/// the side. Window shadows may extend past the screen and are not counted.
+fn cut_off_shapes(output: &egui::FullOutput) -> usize {
+    output
+        .shapes
+        .iter()
+        .filter(|s| {
+            matches!(
+                s.shape,
+                egui::epaint::Shape::Text(_) | egui::epaint::Shape::Rect(_)
+            )
+        })
+        .filter(|s| {
+            let rect = s.shape.visual_bounding_rect();
+            rect.is_finite()
+                && rect.max.x > s.clip_rect.max.x + 0.5
+                && rect.min.x < s.clip_rect.max.x
+        })
+        .count()
+}
+
+/// Enabled controls entirely on screen that are smaller than 44×44 points.
+fn small_targets(ctx: &egui::Context, size: [f32; 2]) -> Vec<egui::Rect> {
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size.into());
+    ctx.viewport(|v| {
+        v.this_pass
+            .widgets
+            .layers()
+            .flat_map(|(_, w)| w.iter())
+            .filter(|w| w.enabled && w.sense.senses_click() && screen.contains_rect(w.rect))
+            // Scroll bars are swiped past, not tapped.
+            .filter(|w| !(w.rect.width() <= 12.0 && w.rect.height() > 100.0))
+            .filter(|w| w.rect.width() < 44.0 || w.rect.height() < 44.0)
+            .map(|w| w.rect)
+            .collect()
+    })
+}
+
+#[test]
+fn phone_layouts_fit_every_supported_size() {
+    // German is the web app's language and has the longer texts.
+    for language in [i18n::Language::English, i18n::Language::German] {
+        i18n::set_language(language);
+        for size in PHONE_SIZES {
+            // Three players fit at 312 points (large text on a 390-point phone), four from 375 on.
+            let players = if size[0] < 375.0 { 3 } else { 4 };
+            let (app, ctx, output) = phone_analyzer(players, size);
+            assert_eq!(
+                cut_off_shapes(&output),
+                0,
+                "{language:?} {size:?}: content cut off at the side"
+            );
+            let small = small_targets(&ctx, size);
+            assert!(
+                small.is_empty(),
+                "{language:?} {size:?}: targets under 44 points: {small:?}"
+            );
+            let last = phone_rect(&ctx, ("phone_cell", players - 1, 0_usize));
+            assert!(
+                last.max.x <= size[0],
+                "{size:?}: player columns need sideways scrolling"
+            );
+            if size[1] >= 844.0 {
+                let best = app.report.as_ref().unwrap().best_action.unwrap();
+                let apply = phone_rect(&ctx, ("phone_move", best));
+                let palette = phone_rect(&ctx, ("phone_face_rect", 6_u8));
+                assert!(
+                    apply.max.y <= size[1] && palette.max.y <= size[1],
+                    "{size:?}"
+                );
+            }
+        }
+    }
+    i18n::set_language(i18n::Language::English);
+}
+
+#[test]
+fn phone_picker_and_player_sheet_fit_the_smallest_size() {
+    for language in [i18n::Language::English, i18n::Language::German] {
+        i18n::set_language(language);
+        picker_and_player_sheet_fit(PHONE_SIZES[0]);
+    }
+    i18n::set_language(i18n::Language::English);
+}
+
+fn picker_and_player_sheet_fit(size: [f32; 2]) {
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size.into());
+    let (mut app, ctx, _) = phone_analyzer(3, size);
+    app.edit = Some((1, 12));
+    render_size(&mut app, &ctx, vec![], size);
+    let output = render_size(&mut app, &ctx, vec![], size);
+    let window = |id: &str| ctx.memory(|m| m.area_rect(egui::Id::new(id))).unwrap();
+    assert!(screen.contains_rect(window("score_picker")));
+    for value in picker::values(12) {
+        let rect = picker_value_rect(&ctx, value).unwrap();
+        assert!(
+            screen.contains_rect(rect),
+            "picker value {value} at {rect:?}"
+        );
+        assert!(rect.width() >= 44.0 && rect.height() >= 44.0);
+    }
+    assert_eq!(cut_off_shapes(&output), 0);
+    app.edit = None;
+    app.open_player_sheet(1);
+    render_size(&mut app, &ctx, vec![], size);
+    let output = render_size(&mut app, &ctx, vec![], size);
+    assert_eq!(cut_off_shapes(&output), 0);
+    let sheet = window("player_sheet");
+    assert!(
+        sheet.min.x >= 12.0 && sheet.max.x <= size[0] - 12.0,
+        "{sheet:?}"
+    );
+    assert!(sheet.max.y <= size[1]);
+    assert!(small_targets(&ctx, size).is_empty());
+    for label in ["Done", "Cancel", "Earlier", "Later"] {
+        let label = i18n::t(label);
+        assert!(
+            sheet.contains(label_center(&output, label)),
+            "{label} outside the sheet"
+        );
+    }
+}

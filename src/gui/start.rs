@@ -33,6 +33,7 @@ pub(super) fn default_name(index: usize) -> String {
 
 impl Desktop {
     pub(super) fn phone_start_ui(&mut self, ui: &mut egui::Ui) {
+        ui.style_mut().interaction.selectable_labels = false;
         egui::ScrollArea::vertical()
             .id_salt("phone_start")
             .show(ui, |ui| {
@@ -71,6 +72,7 @@ impl Desktop {
 
     /// „Wer spielt mit?“: player count and optional names, in playing order.
     pub(super) fn phone_players_ui(&mut self, ui: &mut egui::Ui) {
+        ui.style_mut().interaction.selectable_labels = false;
         egui::ScrollArea::vertical()
             .id_salt("phone_players")
             .show(ui, |ui| {

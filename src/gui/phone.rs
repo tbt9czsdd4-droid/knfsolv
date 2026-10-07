@@ -60,6 +60,8 @@ fn big_button(ui: &mut egui::Ui, label: impl Into<egui::WidgetText>, enabled: bo
 
 impl Desktop {
     pub(super) fn phone_ui(&mut self, ui: &mut egui::Ui) {
+        // Touching text should scroll, not start a text selection.
+        ui.style_mut().interaction.selectable_labels = false;
         self.phone_top_bar(ui);
         egui::ScrollArea::vertical()
             .id_salt("phone_play")
@@ -640,35 +642,52 @@ impl Desktop {
         }
     }
 
+    /// Collapsed engine details, behind a 44-point toggle rather than a small disclosure line.
     fn technical_details(&self, ui: &mut egui::Ui, report: &Report) {
-        egui::CollapsingHeader::new(t("Technical details"))
-            .id_salt("phone_details")
-            .show(ui, |ui| {
-                ui.small(format!(
-                    "{} · {} · {}",
-                    report.method,
-                    report.status.replace('_', " "),
-                    report.confidence.replace('_', " ")
-                ));
+        let id = egui::Id::new("phone_details_open");
+        let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+        let label = format!(
+            "{} {}",
+            if open { "⏷" } else { "⏵" },
+            t("Technical details")
+        );
+        if ui
+            .add(
+                egui::Button::new(label)
+                    .frame(false)
+                    .min_size(egui::vec2(TARGET, TARGET)),
+            )
+            .clicked()
+        {
+            open = !open;
+            ui.data_mut(|d| d.insert_temp(id, open));
+        }
+        if open {
+            ui.small(format!(
+                "{} · {} · {}",
+                report.method,
+                report.status.replace('_', " "),
+                report.confidence.replace('_', " ")
+            ));
+            ui.small(tf(
+                "{count} games · {seconds} s computing",
+                &[
+                    ("count", &count(report.samples)),
+                    ("seconds", &decimal(report.elapsed_ms as f64 / 1000.0, 1)),
+                ],
+            ));
+            if let Some(m) = report.forecast {
                 ui.small(tf(
-                    "{count} games · {seconds} s computing",
+                    "Win {win} · tie {tie}",
                     &[
-                        ("count", &count(report.samples)),
-                        ("seconds", &decimal(report.elapsed_ms as f64 / 1000.0, 1)),
+                        ("win", &percent(m.outright_win, 1)),
+                        ("tie", &percent(m.tied_first, 1)),
                     ],
                 ));
-                if let Some(m) = report.forecast {
-                    ui.small(tf(
-                        "Win {win} · tie {tie}",
-                        &[
-                            ("win", &percent(m.outright_win, 1)),
-                            ("tie", &percent(m.tied_first, 1)),
-                        ],
-                    ));
-                }
-                ui.small(&report.stop_reason);
-                ui.small(&report.selection_reason);
-            });
+            }
+            ui.small(&report.stop_reason);
+            ui.small(&report.selection_reason);
+        }
     }
 
     /// Short row names, players in columns. With more players than fit, the player columns
