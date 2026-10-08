@@ -127,6 +127,10 @@ impl Desktop {
                 if wide_button(ui, t("Against the computer"), false) {
                     self.navigate(Screen::ComputerSetup);
                 }
+                ui.add_space(8.0);
+                if wide_button(ui, t("Help & rules"), false) {
+                    self.show_help = true;
+                }
                 if !self.message.is_empty() {
                     ui.small(&self.message);
                 }

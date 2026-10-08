@@ -2181,6 +2181,7 @@ struct FakeBrowser {
     shared: Rc<RefCell<Vec<String>>>,
     picker_opened: Rc<Cell<usize>>,
     picked: Rc<RefCell<Option<std::result::Result<String, String>>>>,
+    url: Option<String>,
 }
 impl Browser for FakeBrowser {
     fn share(&self, json: &str) -> Result<()> {
@@ -2192,6 +2193,9 @@ impl Browser for FakeBrowser {
     }
     fn take_opened(&self) -> Option<std::result::Result<String, String>> {
         self.picked.borrow_mut().take()
+    }
+    fn app_url(&self) -> Option<String> {
+        self.url.clone()
     }
 }
 fn browser_app(session: Session) -> (Desktop, FakeBrowser, egui::Context) {
@@ -3494,9 +3498,13 @@ fn finish_recorded(app: &mut Desktop, recorder: &Recorder, ctx: &egui::Context, 
 /// An app as the web shell starts it: with a browser, so without file paths.
 fn web_app() -> Desktop {
     let mut app = startup(Session::new(2), None);
-    app.set_browser(Box::new(FakeBrowser::default()));
+    app.set_browser(Box::new(FakeBrowser {
+        url: Some(APP_URL.into()),
+        ..Default::default()
+    }));
     app
 }
+const APP_URL: &str = "https://192.168.0.69:8443/";
 
 #[test]
 fn normal_flows_show_no_english_in_german() {
@@ -3514,6 +3522,10 @@ fn normal_flows_show_no_english_in_german() {
             app.navigate(screen);
             assert_german(&mut app, &ctx, size, &format!("{screen:?}"));
         }
+        app.navigate(Screen::Home);
+        app.show_help = true;
+        assert_german(&mut app, &ctx, size, "help");
+        app.show_help = false;
 
         // The analyzer: forecast before the roll, advice, picker, player sheet, settings.
         let (mut app, recorder) = recorded_editor(2);
@@ -3613,4 +3625,73 @@ fn number_fields_group_thousands_in_german() {
     let english = texts(&render_size(&mut app, &ctx, vec![], PHONE));
     assert!(german.contains(&"20\u{a0}000".to_string()), "{german:?}");
     assert!(english.contains(&"20000".to_string()), "{english:?}");
+}
+
+/// Black squares drawn: the dark modules of a QR code.
+fn black_squares(output: &egui::FullOutput) -> usize {
+    output
+        .shapes
+        .iter()
+        .filter(
+            |s| matches!(&s.shape, egui::epaint::Shape::Rect(r) if r.fill == egui::Color32::BLACK),
+        )
+        .count()
+}
+
+#[test]
+fn phone_help_page_explains_the_app_and_shows_its_address() {
+    i18n::set_language(i18n::Language::German);
+    for size in PHONE_SIZES {
+        let ctx = egui::Context::default();
+        let mut app = web_app();
+        let output = render_size(&mut app, &ctx, vec![], size);
+        click_size(
+            &mut app,
+            &ctx,
+            label_center(&output, "Hilfe & Regeln"),
+            size,
+        );
+        assert!(app.show_help);
+        render_size(&mut app, &ctx, vec![], size);
+        let output = render_size(&mut app, &ctx, vec![], size);
+        let shown = texts(&output);
+        for heading in ["Hilfe & Regeln", "So geht's", "Was die Zahlen bedeuten"] {
+            assert!(shown.contains(&heading.to_string()), "{heading}: {shown:?}");
+        }
+        assert_eq!(cut_off_shapes(&output), 0, "{size:?}");
+        let small = small_targets(&ctx, size);
+        assert!(small.is_empty(), "{size:?}: {small:?}");
+        // The QR code and the address sit at the end of the page.
+        let tall = [size[0], 4000.0];
+        let ctx_tall = egui::Context::default();
+        render_size(&mut app, &ctx_tall, vec![], tall);
+        let output = render_size(&mut app, &ctx_tall, vec![], tall);
+        assert!(texts(&output).contains(&APP_URL.to_string()));
+        assert!(black_squares(&output) > 100, "{size:?}");
+        let output = render_size(&mut app, &ctx, vec![], size);
+        click_size(&mut app, &ctx, label_center(&output, "‹ Zurück"), size);
+        assert!(!app.show_help);
+    }
+    i18n::set_language(i18n::Language::English);
+}
+
+#[test]
+fn help_is_a_window_on_larger_screens_and_has_no_code_without_a_browser() {
+    let ctx = egui::Context::default();
+    let mut app = web_app();
+    app.execute(Pending::Analyze(2));
+    let output = render(&mut app, &ctx, vec![]);
+    click(&mut app, &ctx, label_center(&output, "Help & rules"));
+    assert!(app.show_help);
+    render(&mut app, &ctx, vec![]);
+    render(&mut app, &ctx, vec![]);
+    assert!(ctx.memory(|m| m.area_rect(egui::Id::new("help"))).is_some());
+    // The desktop app has no address to pass on.
+    let ctx = egui::Context::default();
+    let mut app = startup(Session::new(2), None);
+    app.show_help = true;
+    render_size(&mut app, &ctx, vec![], [1180.0, 4000.0]);
+    let output = render_size(&mut app, &ctx, vec![], [1180.0, 4000.0]);
+    assert!(texts(&output).contains(&"How to use it".to_string()));
+    assert_eq!(black_squares(&output), 0);
 }

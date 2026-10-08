@@ -253,6 +253,10 @@ impl Desktop {
             ui.close();
         }
         ui.separator();
+        if item(ui, t("Help & rules")) {
+            self.show_help = true;
+            ui.close();
+        }
         if item(ui, t("Advanced …")) {
             self.show_settings = true;
             ui.close();

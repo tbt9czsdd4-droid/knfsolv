@@ -22,6 +22,7 @@ use std::{
 };
 use web_time::Instant;
 
+mod help;
 pub mod i18n;
 mod phone;
 mod picker;
@@ -52,6 +53,10 @@ pub trait Browser {
     fn open(&self);
     /// The text of a picked file, or why it could not be read.
     fn take_opened(&self) -> Option<std::result::Result<String, String>>;
+    /// The app's own address, to pass on as a QR code.
+    fn app_url(&self) -> Option<String> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,6 +90,8 @@ pub struct Desktop {
     /// The language whose number format egui's style has.
     applied_language: Option<i18n::Language>,
     show_settings: bool,
+    /// „Hilfe & Regeln“: a page on the phone, a window on larger screens.
+    show_help: bool,
     engine_tab: bool,
     preferences: Option<crate::preferences::Preferences>,
     preference_store: Option<crate::preferences::Store>,
@@ -553,6 +560,7 @@ impl Desktop {
             applied_zoom: None,
             applied_language: None,
             show_settings: false,
+            show_help: false,
             engine_tab: true,
             preferences: None,
             preference_store: None,
@@ -1095,6 +1103,7 @@ impl Desktop {
     fn computer_enabled(&self) -> bool {
         self.screen == Screen::Play
             && !self.show_settings
+            && !self.show_help
             && self.pending.is_none()
             && self.edit.is_none()
             && !self.game.editing()
@@ -2204,6 +2213,7 @@ impl Desktop {
         if ctx.text_edit_focused()
             || self.screen != Screen::Play
             || self.show_settings
+            || self.show_help
             || self.pending.is_some()
             || self.edit.is_some()
         {
@@ -2298,6 +2308,9 @@ impl Desktop {
                     self.navigate(Screen::AnalysisSetup);
                 }
                 ui.separator();
+                if ui.button(t("Help & rules")).clicked() {
+                    self.show_help = true;
+                }
                 if let Some(browser) = &self.browser {
                     if ui.button(t("Open position")).clicked() {
                         browser.open();
@@ -2620,6 +2633,7 @@ impl Desktop {
                     }
                 });
                 ui.toggle_value(&mut self.show_settings, t("Settings"));
+                ui.toggle_value(&mut self.show_help, t("Help & rules"));
                 if self.game.has_computer() {
                     ui.separator();
                     let config = &self.game.session().desktop.as_ref().unwrap().computer;
@@ -2687,11 +2701,16 @@ impl Desktop {
         let phone = ui.available_width() < phone::PHONE_WIDTH;
         // On the phone, the settings are a page of their own rather than a window.
         let settings_page = phone && self.show_settings && self.screen == Screen::Play;
+        let help_page = phone && self.show_help;
         let modal = self.pending.is_some()
             || self.edit.is_some()
             || self.player_sheet.is_some()
             || (self.show_settings && !settings_page);
         ui.add_enabled_ui(!modal, |ui| {
+            if help_page {
+                self.phone_help_ui(ui);
+                return;
+            }
             if self.screen != Screen::Play {
                 match self.screen {
                     Screen::Home if phone => self.phone_start_ui(ui),
@@ -2792,6 +2811,16 @@ impl Desktop {
                     });
             }
         });
+        if self.show_help && !help_page {
+            let mut open = true;
+            egui::Window::new(t("Help & rules"))
+                .id(egui::Id::new("help"))
+                .open(&mut open)
+                .default_width(480.0)
+                .vscroll(true)
+                .show(&ctx, |ui| self.help_ui(ui));
+            self.show_help = open;
+        }
         if self.show_settings && !settings_page {
             let mut open = true;
             egui::Window::new(t("Settings"))

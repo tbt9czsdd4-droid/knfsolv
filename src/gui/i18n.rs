@@ -850,6 +850,17 @@ const GERMAN: &[(&str, &str)] = &[
         "Depth counts your decisions, not dice or opponents. Simulations finish the whole game. Exact search uses time/nodes.",
         "Die Tiefe zählt deine Entscheidungen, nicht Würfel oder Gegner. Simulationen spielen die ganze Partie zu Ende. Die exakte Suche nutzt Zeit und Knoten.",
     ),
+    // Help.
+    ("Help & rules", "Hilfe & Regeln"),
+    ("Share the app", "App weitergeben"),
+    (
+        "Let others scan this code with their camera. In Safari, they tap Share ⬆ and then “Add to Home Screen”.",
+        "Lass andere diesen Code mit der Kamera scannen. In Safari tippen sie dann auf Teilen ⬆ und „Zum Home-Bildschirm“.",
+    ),
+    (
+        "Safari and the Home Screen app keep separate positions; use the app from the Home Screen.",
+        "Safari und die App auf dem Home-Bildschirm speichern getrennt; nutze die App vom Home-Bildschirm aus.",
+    ),
     // Messages.
     (
         "Something went wrong: {error}",

@@ -119,6 +119,15 @@ impl Browser for WebFiles {
         }
     }
 
+    fn app_url(&self) -> Option<String> {
+        // Without the query, so a shared link never starts the benchmark or debug views.
+        let location = web_sys::window()?.location();
+        Some(format!(
+            "{}{}",
+            location.origin().ok()?,
+            location.pathname().ok()?
+        ))
+    }
     fn take_opened(&self) -> Option<std::result::Result<String, String>> {
         self.0.opened.borrow_mut().take()
     }
