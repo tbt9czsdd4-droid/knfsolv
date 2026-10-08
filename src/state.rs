@@ -74,6 +74,7 @@ pub enum Phase {
 #[serde(deny_unknown_fields)]
 pub struct Position {
     pub schema_version: u32,
+    #[serde(deserialize_with = "rules::saved_rules_version")]
     pub rules_version: String,
     pub players: Vec<Player>,
     /// Indices into players, first player in the match first.

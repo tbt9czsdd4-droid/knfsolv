@@ -47,7 +47,10 @@ fn pdf_scoring_and_straights() {
     assert_eq!(rules::ordinary_score(d, 8), 25);
     assert_eq!(rules::ordinary_score(dice(&[1, 2, 3, 4, 3]), 9), 30);
     assert_eq!(rules::ordinary_score(dice(&[2, 3, 4, 5, 6]), 10), 40);
-    assert_eq!(rules::ordinary_score(dice(&[3, 3, 3, 3, 3]), 8), 0);
+    // House rule: five of a kind is three of a kind plus a pair, so a Full House too.
+    assert_eq!(rules::ordinary_score(dice(&[3, 3, 3, 3, 3]), 8), 25);
+    assert_eq!(rules::ordinary_score(dice(&[3, 3, 3, 3, 5]), 8), 0);
+    assert_eq!(rules::ordinary_score(dice(&[3, 3, 3, 5, 6]), 8), 0);
     assert_eq!(rules::ordinary_score(dice(&[3, 3, 3, 3, 3]), 7), 15);
     assert_eq!(rules::ordinary_score(dice(&[3, 3, 3, 3, 3]), 11), 50);
 }
@@ -104,6 +107,46 @@ fn bonus_thresholds_and_additional_kniffel() {
     )
     .unwrap();
     assert_eq!(s.total() - before, 15);
+}
+#[test]
+fn five_of_a_kind_is_a_full_house_in_play_and_advice() {
+    let fours = dice(&[4, 4, 4, 4, 4]);
+    // With Kniffel crossed out there is no extra Kniffel, but Full House still pays 25.
+    let mut s = Sheet::default();
+    s.cells[11] = Some(0);
+    assert!(rules::scoring_actions(&s, fours).contains(&Action::Write { category: 8 }));
+    assert!(rules::write(&mut s.clone(), fours, Action::CrossOut { category: 8 }).is_err());
+    rules::write(&mut s, fours, Action::Write { category: 8 }).unwrap();
+    assert_eq!((s.cells[8], s.extra_kniffels), (Some(25), 0));
+    // With Kniffel still open, both rows accept it.
+    let open = Sheet::default();
+    assert_eq!(rules::score(&open, fours, 8), 25);
+    assert_eq!(rules::score(&open, fours, 11), 50);
+
+    // The exact solver writes the Full House instead of crossing it out.
+    let mut p = Position::new(1);
+    p.players[0].sheet.cells = [Some(0); 13];
+    p.players[0].sheet.cells[8] = None;
+    p.players[0].sheet.cells[12] = None;
+    p.phase = Phase::Decision {
+        dice: dice(&[2, 2, 2, 2, 2]),
+        rerolls_left: 0,
+    };
+    p.validate().unwrap();
+    let report = solver::analyze(&p, &exact_settings(), Cancel::default()).unwrap();
+    assert_eq!(report.status, "exact_under_model");
+    assert_eq!(report.best_action, Some(Action::Write { category: 8 }));
+}
+#[test]
+fn positions_saved_under_the_previous_rules_load_as_current() {
+    let current = std::fs::read_to_string("examples/middle.json").unwrap();
+    assert!(current.contains(rules::RULES_VERSION));
+    let legacy = current.replace(rules::RULES_VERSION, rules::LEGACY_RULES_VERSION);
+    let session = Session::from_json(&legacy).unwrap();
+    assert_eq!(session.position.rules_version, rules::RULES_VERSION);
+    assert_eq!(session, Session::from_json(&current).unwrap());
+    let unknown = current.replace(rules::RULES_VERSION, "some_other_rules");
+    assert!(Session::from_json(&unknown).is_err());
 }
 #[test]
 fn probability_tables_match_independent_ordered_enumeration() {

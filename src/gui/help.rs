@@ -36,7 +36,7 @@ const GERMAN: &[Section] = &[
             "Jeder Zug beginnt mit fünf Würfeln; du darfst bis zu zweimal beliebige Würfel neu würfeln. Danach trägst du in ein freies Feld ein. Nach 13 Runden ist das Spiel vorbei.",
             "• Einser bis Sechser: die Summe dieser Augen. Ab 63 Punkten oben gibt es 35 Bonus.",
             "• Dreierpasch, Viererpasch, Chance: die Summe aller Würfel.",
-            "• Full House 25, Kleine Straße (vier in Folge) 30, Große Straße (fünf in Folge) 40, Kniffel (fünf gleiche) 50.",
+            "• Full House (drei gleiche und ein Paar) 25, Kleine Straße (vier in Folge) 30, Große Straße (fünf in Folge) 40, Kniffel (fünf gleiche) 50.",
             "• Passt der Wurf in kein gewünschtes Feld, wird ein Feld gestrichen (0).",
         ],
     ),
@@ -45,7 +45,8 @@ const GERMAN: &[Section] = &[
         &[
             "• Zusatz-Kniffel gibt es nur, wenn im Kniffel-Feld schon 50 stehen. Er bringt 50 Zusatzpunkte, und der Wurf zählt in jedem freien Feld voll: oben fünfmal die Augenzahl, Dreierpasch, Viererpasch und Chance 30, Full House 25, Straßen 30 und 40. Wurde Kniffel gestrichen, gibt es keine Zusatz-Kniffel.",
             "• Ein Feld, das zum Wurf passt, darf nicht freiwillig gestrichen werden.",
-            "• Eine Große Straße zählt auch als Kleine Straße. Fünf gleiche Würfel sind kein Full House.",
+            "• Fünf gleiche Würfel zählen auch als Full House, mit den üblichen 25 Punkten.",
+            "• Eine Große Straße zählt auch als Kleine Straße.",
         ],
     ),
 ];
@@ -76,7 +77,7 @@ const ENGLISH: &[Section] = &[
             "Each turn starts with five dice; any dice may be rerolled up to twice. Then a free category is scored. The game ends after 13 rounds.",
             "• Ones to Sixes: the sum of those faces. 63 or more in the upper section earns a 35-point bonus.",
             "• Three of a kind, Four of a kind, Chance: the sum of all dice.",
-            "• Full House 25, Small Straight (four in a row) 30, Large Straight (five in a row) 40, Kniffel (five of a kind) 50.",
+            "• Full House (three of a kind and a pair) 25, Small Straight (four in a row) 30, Large Straight (five in a row) 40, Kniffel (five of a kind) 50.",
             "• When the roll fits no wanted category, one is crossed out (0).",
         ],
     ),
@@ -85,7 +86,8 @@ const ENGLISH: &[Section] = &[
         &[
             "• An extra Kniffel only counts with 50 already in the Kniffel row. It earns 50 extra points, and the roll scores in full in any open category: upper rows five times the face, Three and Four of a kind and Chance 30, Full House 25, straights 30 and 40. With Kniffel crossed out, there are no extra Kniffels.",
             "• A category that fits the roll cannot be crossed out on purpose.",
-            "• A Large Straight also counts as a Small Straight. Five of a kind is not a Full House.",
+            "• Five of a kind also counts as a Full House, for the usual 25 points.",
+            "• A Large Straight also counts as a Small Straight.",
         ],
     ),
 ];

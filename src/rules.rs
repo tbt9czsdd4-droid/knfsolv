@@ -1,7 +1,12 @@
 use crate::{Error, Result, dice::Dice, state::Sheet};
 use serde::{Deserialize, Serialize};
 
-pub const RULES_VERSION: &str = "schmidt_pdf_2024_standard_v1";
+/// The Schmidt rules with the house conventions of docs/rules.md, including five of a kind as a
+/// Full House.
+pub const RULES_VERSION: &str = "schmidt_pdf_2024_house_v2";
+/// Positions saved before five of a kind counted as a Full House. Their sheets are valid under the
+/// current rules, so they load as current positions.
+pub const LEGACY_RULES_VERSION: &str = "schmidt_pdf_2024_standard_v1";
 pub const NAMES: [&str; 13] = [
     "Ones",
     "Twos",
@@ -74,13 +79,25 @@ pub fn ordinary_score(d: Dice, c: usize) -> u16 {
         0..=5 => (c as u16 + 1) * d.0[c] as u16,
         6 if d.0.iter().any(|&n| n >= 3) => d.sum(),
         7 if d.0.iter().any(|&n| n >= 4) => d.sum(),
-        8 if d.0.contains(&3) && d.0.contains(&2) => 25,
+        // House rule: five of a kind is a three of a kind plus a pair, so a Full House too.
+        8 if (d.0.contains(&3) && d.0.contains(&2)) || d.0.contains(&5) => 25,
         9 if (0..=2).any(|s| d.0[s..s + 4].iter().all(|&n| n > 0)) => 30,
         10 if (0..=1).any(|s| d.0[s..s + 5].iter().all(|&n| n > 0)) => 40,
         11 if d.0.contains(&5) => 50,
         12 => d.sum(),
         _ => 0,
     }
+}
+/// Reads a saved rules version, upgrading [`LEGACY_RULES_VERSION`] to the current one.
+pub fn saved_rules_version<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<String, D::Error> {
+    let version = String::deserialize(deserializer)?;
+    Ok(if version == LEGACY_RULES_VERSION {
+        RULES_VERSION.into()
+    } else {
+        version
+    })
 }
 pub fn extra_eligible(sheet: &Sheet, d: Dice) -> bool {
     sheet.cells[11] == Some(50) && d.0.contains(&5)

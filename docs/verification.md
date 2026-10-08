@@ -1,6 +1,14 @@
 # Verification results
 
 
+## October 8: five of a kind as a Full House
+
+The family's house rule now holds in the engine: five of a kind scores 25 in Full House, whether or not Kniffel is open, and a Full House can no longer be crossed out with five of a kind (rules version `schmidt_pdf_2024_house_v2`, [rules.md](rules.md)). Positions saved under `schmidt_pdf_2024_standard_v1` load as current positions; v1 models and solitaire caches are rejected and rebuilt.
+
+The bundled continuation model was retrained with the original parameters (`train-baseline --games 5000 --iterations 2 --seed 42`, about 2 s). Its final-iteration Full House histogram for turns without extra-Kniffel eligibility moved from 1,069 zeros and 2,615 × 25 to 1,036 and 2,707. `five_of_a_kind_is_a_full_house_in_play_and_advice` checks scoring, the forbidden cross-out, and that the exact solver writes the Full House (25) with 2 2 2 2 2, Kniffel crossed out, and only Full House and Chance open, where the old rule forced a cross-out. `positions_saved_under_the_previous_rules_load_as_current` checks the upgrade. The workspace tests pass.
+
+Measurements below this entry, including the preset strength and advice-mode comparisons, were taken under the v1 rule and were not rerun; the rule changes few decisions (mostly five of a kind with Kniffel already crossed out), so their conclusions are expected to hold.
+
 ## October 6: advice modes in full games
 
 Should coaching recommend the move with the highest displayed win chance instead of the conservative baseline? `compare_advice_modes_in_full_games` in `tests/quality.rs` plays each game once per advice mode with the same dice for every player, turn, and roll. The analyzed player follows coaching exactly as the app runs it (`AnalysisSession`, Auto: a bounded exact attempt in small endgames, otherwise fixed-policy rollouts) with 5,000 games per decision, about the phone's three seconds. The other player uses the bundled continuation-v2 baseline; the analyzed seat rotates. All three modes read the same report, which has identical alternatives in both advice settings.

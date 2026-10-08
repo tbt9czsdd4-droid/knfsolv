@@ -1,7 +1,7 @@
 {
   "position": {
     "schema_version": 1,
-    "rules_version": "schmidt_pdf_2024_standard_v1",
+    "rules_version": "schmidt_pdf_2024_house_v2",
     "players": [
       {"name": "You", "sheet": {"cells": [0,0,0,0,0,0,0,0,0,0,0,0,null], "extra_kniffels": 0}},
       {"name": "Opponent", "sheet": {"cells": [0,0,0,0,0,0,0,0,25,0,0,0,0], "extra_kniffels": 0}}
