@@ -194,6 +194,7 @@ impl Position {
         }
         Ok(())
     }
+    /// The moves worth considering, as analysis sees them; see [`rules::scoring_actions`].
     pub fn actions(&self) -> Vec<Action> {
         match self.phase {
             Phase::BeforeFirstRoll => vec![Action::RollAll],
@@ -211,6 +212,31 @@ impl Position {
             }
             _ => vec![],
         }
+    }
+    /// Whether `action` may be played: any of [`Self::actions`], or crossing out any open
+    /// category, which is always allowed.
+    pub fn is_legal(&self, action: Action) -> bool {
+        match (self.phase, action) {
+            (Phase::Decision { .. }, Action::CrossOut { category }) => {
+                category < 13 && self.players[self.active_player].sheet.cells[category].is_none()
+            }
+            _ => self.actions().contains(&action),
+        }
+    }
+    /// Enters `points` in `category` for the player to move, one of [`rules::entry_points`],
+    /// and moves on to the next player.
+    pub fn enter(&mut self, category: usize, points: u16) -> Result<()> {
+        let Phase::Decision { dice, .. } = self.phase else {
+            return Err(Error::Invalid("Action is not legal in this phase".into()));
+        };
+        rules::write_points(
+            &mut self.players[self.active_player].sheet,
+            dice,
+            category,
+            points,
+        )?;
+        self.advance();
+        Ok(())
     }
     pub fn apply(&mut self, action: Action) -> Result<()> {
         match (self.phase, action) {

@@ -3569,6 +3569,9 @@ fn normal_flows_show_no_english_in_german() {
         }
         app.flush_correction(Instant::now() + Duration::from_secs(5));
         assert_german(&mut app, &ctx, size, "local game roll");
+        app.entry_choice = Some(2);
+        assert_german(&mut app, &ctx, size, "entry choice");
+        app.entry_choice = None;
         app.local_setup.dice_source = DiceSource::Digital;
         app.execute(Pending::Local(app.local_setup.clone()));
         assert_german(&mut app, &ctx, size, "app dice");
@@ -3694,4 +3697,77 @@ fn help_is_a_window_on_larger_screens_and_has_no_code_without_a_browser() {
     let output = render_size(&mut app, &ctx, vec![], [1180.0, 4000.0]);
     assert!(texts(&output).contains(&"How to use it".to_string()));
     assert_eq!(black_squares(&output), 0);
+}
+
+/// A right-click; touch screens report a long press the same way.
+fn secondary_click(app: &mut Desktop, ctx: &egui::Context, pos: egui::Pos2, size: [f32; 2]) {
+    for pressed in [true, false] {
+        render_size(
+            app,
+            ctx,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Secondary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            size,
+        );
+    }
+}
+
+fn local_game_with_roll(faces: [u8; 5]) -> Desktop {
+    let mut app = startup(Session::new(2), None);
+    app.execute(Pending::Local(app.local_setup.clone()));
+    for face in faces {
+        app.choose_face(face, Instant::now());
+    }
+    app.flush_correction(Instant::now() + Duration::from_secs(5));
+    app
+}
+
+#[test]
+fn a_long_press_offers_every_entry_in_a_game() {
+    // Phone: five ones may count as three in Einser.
+    let ctx = egui::Context::default();
+    let mut app = local_game_with_roll([1; 5]);
+    let player = app.game.session().position.active_player;
+    render_size(&mut app, &ctx, vec![], PHONE);
+    let cell = phone_rect(&ctx, ("phone_cell", player, 0_usize));
+    secondary_click(&mut app, &ctx, cell.center(), PHONE);
+    assert_eq!(app.entry_choice, Some(0));
+    let output = render_size(&mut app, &ctx, vec![], PHONE);
+    for label in ["5 points", "1 point", "Cross out (0)"] {
+        assert!(texts(&output).contains(&label.to_string()), "{label}");
+    }
+    let three = picker_rect(&ctx, ("entry", 3_u16)).unwrap();
+    click_size(&mut app, &ctx, three.center(), PHONE);
+    let position = &app.game.session().position;
+    assert_eq!(position.players[player].sheet.cells[0], Some(3));
+    assert_ne!(position.active_player, player);
+    assert_eq!(app.entry_choice, None);
+    app.undo(false);
+    assert_eq!(
+        app.game.session().position.players[player].sheet.cells[0],
+        None
+    );
+
+    // Desktop: a right-click crosses out Chance although the roll fits.
+    let ctx = egui::Context::default();
+    let mut app = local_game_with_roll([6, 6, 5, 5, 4]);
+    let player = app.game.session().position.active_player;
+    render_size(&mut app, &ctx, vec![], TALL);
+    let cell = score_cell_center(&ctx, player, 12);
+    secondary_click(&mut app, &ctx, cell, TALL);
+    assert_eq!(app.entry_choice, Some(12));
+    render_size(&mut app, &ctx, vec![], TALL);
+    let cross = picker_rect(&ctx, ("entry", 0_u16)).unwrap();
+    click_size(&mut app, &ctx, cross.center(), TALL);
+    assert_eq!(
+        app.game.session().position.players[player].sheet.cells[12],
+        Some(0)
+    );
 }

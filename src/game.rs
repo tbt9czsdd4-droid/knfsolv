@@ -259,9 +259,19 @@ pub struct DiceDraft {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GameEventKind {
-    Roll { faces: [u8; 5], generated: bool },
-    Correction { faces: [u8; 5] },
+    Roll {
+        faces: [u8; 5],
+        generated: bool,
+    },
+    Correction {
+        faces: [u8; 5],
+    },
     Action(Action),
+    /// An entry chosen by points, such as crossing out a fitting category.
+    Entry {
+        category: usize,
+        points: u16,
+    },
     Edit,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -988,6 +998,26 @@ impl GameController {
         }
         self.apply_action(action, true, now)
     }
+    /// A human entry chosen by points ([`crate::rules::entry_points`]): crossing out a fitting
+    /// category, or counting fewer dice in the upper section.
+    pub fn play_entry(&mut self, category: usize, points: u16, now: Instant) -> Result<()> {
+        if !self.human_can_play() {
+            return Err(Error::Invalid(
+                "Finish correcting dice and leave Edit position before playing a human move".into(),
+            ));
+        }
+        self.session.validate()?;
+        let mut next = self.session.clone();
+        next.position.enter(category, points)?;
+        let actor = self.session.position.active_player;
+        let events = vec![GameEvent {
+            actor,
+            kind: GameEventKind::Entry { category, points },
+        }];
+        self.record(next, DiceDraft::default(), events, true);
+        self.delay_automatic(now);
+        Ok(())
+    }
     /// Whether the position editor can apply advice: complete dice and consistent sheets.
     pub fn can_apply_advice(&self) -> bool {
         self.position_editor()
@@ -1024,7 +1054,7 @@ impl GameController {
     }
     fn apply_action(&mut self, action: Action, human: bool, now: Instant) -> Result<()> {
         self.session.validate()?;
-        if !self.session.position.actions().contains(&action) {
+        if !self.session.position.is_legal(action) {
             return Err(Error::Invalid(
                 "Action is not legal in this position".into(),
             ));
@@ -1142,7 +1172,7 @@ impl GameController {
         {
             return Ok(false);
         }
-        if !self.session.position.actions().contains(&action) || action == Action::RollAll {
+        if !self.session.position.is_legal(action) || action == Action::RollAll {
             return Err(Error::Invalid(
                 "Computer returned an illegal decision".into(),
             ));

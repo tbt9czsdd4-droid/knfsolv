@@ -92,6 +92,8 @@ pub struct Desktop {
     show_settings: bool,
     /// „Hilfe & Regeln“: a page on the phone, a window on larger screens.
     show_help: bool,
+    /// In a game, the category whose possible entries are offered (long press or right-click).
+    entry_choice: Option<usize>,
     engine_tab: bool,
     preferences: Option<crate::preferences::Preferences>,
     preference_store: Option<crate::preferences::Store>,
@@ -561,6 +563,7 @@ impl Desktop {
             applied_language: None,
             show_settings: false,
             show_help: false,
+            entry_choice: None,
             engine_tab: true,
             preferences: None,
             preference_store: None,
@@ -734,6 +737,7 @@ impl Desktop {
         self.screen = screen;
         self.show_settings = false;
         self.edit = None;
+        self.entry_choice = None;
         self.player_sheet = None;
         if let Some(key) = self.requested {
             let paused = self.analysis_paused || screen != Screen::Play;
@@ -1416,6 +1420,7 @@ impl Desktop {
             t("Click an available score to end the turn, including 0. Undo restores it. ★ = advice.")
         });
         let mut action = None;
+        let mut entry = None;
         let mut wheel_cell = None;
         let ready = self.game.human_can_play();
         let suggested = self.report.as_ref().and_then(|r| r.best_action);
@@ -1457,9 +1462,14 @@ impl Desktop {
                             let hint = matches!(suggested, Some(Action::Write { category: c } | Action::CrossOut { category: c }) if c == category);
                             let computer_choice = matches!(self.game.pending_computer_action(), Some(Action::Write { category: c } | Action::CrossOut { category: c }) if c == category);
                             let label = if computer_choice { format!("{points} ⬅ Computer") } else if ready { format!("{points}{}", if hint { " ★" } else { "" }) } else if self.game.control() == PlayerControl::Computer { points.to_string() } else { "…".into() };
-                            if ui.add_enabled(ready, egui::Button::new(label).min_size(egui::vec2(76.0, 26.0)))
-                                .on_hover_text(if rules::extra_eligible(&p.sheet, dice) { t("Score and advance; also awards 50 extra Kniffel points.") } else { t("Score and advance to the next player.") }).clicked()
-                            {
+                            let response = ui.add_enabled(ready, egui::Button::new(label).min_size(egui::vec2(76.0, 26.0)))
+                                .on_hover_text(if rules::extra_eligible(&p.sheet, dice) { t("Score and advance; also awards 50 extra Kniffel points. Right-click for other entries.") } else { t("Score and advance to the next player. Right-click for other entries.") });
+                            #[cfg(test)]
+                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("score_cell_rect", player, category)), response.rect));
+                            // Right-click or a long press offers every entry, such as crossing out.
+                            if response.secondary_clicked() {
+                                entry = Some(category);
+                            } else if response.clicked() {
                                 action = Some(if points == 0 { Action::CrossOut { category } } else { Action::Write { category } });
                             }
                         } else {
@@ -1500,6 +1510,9 @@ impl Desktop {
         if let Some(action) = action {
             let result = self.apply(action);
             self.outcome(result);
+        }
+        if entry.is_some() {
+            self.entry_choice = entry;
         }
     }
     /// The settings, in a window on larger screens and as the phone's „Erweitert“ page. On the
@@ -2138,6 +2151,7 @@ impl Desktop {
 
     fn dialogs(&mut self, ctx: &egui::Context) {
         self.picker_ui(ctx);
+        self.entry_ui(ctx);
         self.player_sheet_ui(ctx);
         // Centered, narrower than the smallest phone, with 44-point buttons.
         let width = (ctx.content_rect().width() - 48.0).clamp(200.0, 320.0);
@@ -2704,6 +2718,7 @@ impl Desktop {
         let help_page = phone && self.show_help;
         let modal = self.pending.is_some()
             || self.edit.is_some()
+            || self.entry_choice.is_some()
             || self.player_sheet.is_some()
             || (self.show_settings && !settings_page);
         ui.add_enabled_ui(!modal, |ui| {

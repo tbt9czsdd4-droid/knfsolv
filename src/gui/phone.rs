@@ -859,6 +859,7 @@ impl Desktop {
         }
         let ready = self.game.human_can_play();
         let mut action = None;
+        let mut entry = None;
         for category in 0..13 {
             let value = sheet.cells[category];
             cell(ui, &mut |ui| {
@@ -879,10 +880,18 @@ impl Desktop {
                     ui.label(value.to_string());
                 } else if rolling && let Phase::Decision { dice, .. } = position.phase {
                     let points = rules::score(&sheet, dice, category);
-                    if ui
-                        .add_enabled(ready, egui::Button::new(points.to_string()))
-                        .clicked()
-                    {
+                    let response = ui.add_enabled(ready, egui::Button::new(points.to_string()));
+                    #[cfg(test)]
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(
+                            egui::Id::new(("phone_cell", player, category)),
+                            response.rect,
+                        )
+                    });
+                    // A long press offers every entry, such as crossing out although it fits.
+                    if response.secondary_clicked() {
+                        entry = Some(category);
+                    } else if response.clicked() {
                         action = Some(if points == 0 {
                             Action::CrossOut { category }
                         } else {
@@ -909,6 +918,9 @@ impl Desktop {
         if let Some(action) = action {
             let result = self.apply(action);
             self.outcome(result);
+        }
+        if entry.is_some() {
+            self.entry_choice = entry;
         }
     }
 }

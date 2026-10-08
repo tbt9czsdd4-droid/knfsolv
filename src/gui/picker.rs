@@ -1,11 +1,14 @@
 //! The score picker: tap a cell, then tap its value. Only legal values are offered, so nothing
-//! needs typing; one tap applies the value and closes the picker, and Undo reverts it.
+//! needs typing; one tap applies the value and closes the picker, and Undo reverts it. In games,
+//! the entry choice offers what the roll allows in one cell beyond its full score: crossing out,
+//! or fewer dice in the upper section.
 use super::{
     Desktop,
     i18n::{category_name, t, tf},
 };
 use crate::{rules, state::Phase};
 use eframe::egui;
+use web_time::Instant;
 
 /// Large enough to hit with a finger.
 const TARGET: f32 = 44.0;
@@ -119,6 +122,68 @@ impl Desktop {
         }
         if close {
             self.edit = None;
+        }
+    }
+
+    /// Every entry the current roll allows in `entry_choice`, highest first, in a game.
+    pub(super) fn entry_ui(&mut self, ctx: &egui::Context) {
+        let Some(category) = self.entry_choice else {
+            return;
+        };
+        let position = &self.game.session().position;
+        let player = position.active_player;
+        let sheet = position.players[player].sheet;
+        let Phase::Decision { dice, .. } = position.phase else {
+            self.entry_choice = None;
+            return;
+        };
+        if sheet.cells[category].is_some() || !self.game.human_can_play() {
+            self.entry_choice = None;
+            return;
+        }
+        let title = format!(
+            "{} · {}",
+            position.players[player].name,
+            category_name(category)
+        );
+        let mut chosen = None;
+        let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        egui::Window::new(title)
+            .id(egui::Id::new("entry_choice"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                let wide = egui::vec2(
+                    COLUMNS as f32 * TARGET + (COLUMNS - 1) as f32 * ui.spacing().item_spacing.x,
+                    TARGET,
+                );
+                for points in rules::entry_points(&sheet, dice, category) {
+                    let label = match points {
+                        0 => t("Cross out (0)").to_string(),
+                        1 => t("1 point").to_string(),
+                        _ => tf("{points} points", &[("points", &points)]),
+                    };
+                    if choice(ui, wide, label, false, ("entry", points)) {
+                        chosen = Some(points);
+                    }
+                }
+                if choice(ui, wide, t("Cancel").into(), false, "cancel") {
+                    close = true;
+                }
+            });
+        if let Some(points) = chosen {
+            let result = self.game.play_entry(category, points, Instant::now());
+            self.refresh_revision();
+            if result.is_ok() {
+                self.message = t("Move applied.").into();
+            }
+            self.outcome(result);
+            close = true;
+        }
+        if close {
+            self.entry_choice = None;
         }
     }
 }

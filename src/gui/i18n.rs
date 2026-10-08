@@ -475,6 +475,7 @@ const GERMAN: &[(&str, &str)] = &[
     ("{name} wins", "{name} gewinnt"),
     ("Tie: {names}", "Gleichstand: {names}"),
     ("{points} points", "{points} Punkte"),
+    ("1 point", "1 Punkt"),
     (
         "Upper section {upper} · bonus {bonus} · extra Kniffels {extra}",
         "Oben {upper} · Bonus {bonus} · Zusatz-Kniffel {extra}",
@@ -681,12 +682,12 @@ const GERMAN: &[(&str, &str)] = &[
         "Scrolle durch die möglichen Werte oder klicke, um einen zu wählen. Offen = leer; 0 = gestrichen. Grenzen des Mausrads: Einstellungen → Spiel.",
     ),
     (
-        "Score and advance; also awards 50 extra Kniffel points.",
-        "Eintragen und weiter; gibt zusätzlich 50 Punkte für den Zusatz-Kniffel.",
+        "Score and advance; also awards 50 extra Kniffel points. Right-click for other entries.",
+        "Eintragen und weiter; gibt zusätzlich 50 Punkte für den Zusatz-Kniffel. Rechtsklick für andere Einträge.",
     ),
     (
-        "Score and advance to the next player.",
-        "Eintragen und weiter zum nächsten Spieler.",
+        "Score and advance to the next player. Right-click for other entries.",
+        "Eintragen und weiter zum nächsten Spieler. Rechtsklick für andere Einträge.",
     ),
     // Larger screens: advice.
     ("Engine settings", "Rechen-Einstellungen"),

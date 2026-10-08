@@ -85,7 +85,11 @@ fn bonus_thresholds_and_additional_kniffel() {
     s.cells[11] = Some(0);
     assert!(!rules::extra_eligible(&s, d));
     assert_eq!(rules::score(&s, d, 10), 0);
-    assert!(rules::write(&mut s, d, Action::CrossOut { category: 12 }).is_err());
+    // Crossing out is always allowed, even where the roll fits; writing needs a fitting roll.
+    let mut crossed = s;
+    rules::write(&mut crossed, d, Action::CrossOut { category: 12 }).unwrap();
+    assert_eq!(crossed.cells[12], Some(0));
+    assert!(rules::write(&mut s.clone(), d, Action::Write { category: 10 }).is_err());
     rules::write(&mut s, d, Action::CrossOut { category: 10 }).unwrap();
     assert_eq!(s.extra_kniffels, 0);
 
@@ -115,7 +119,9 @@ fn five_of_a_kind_is_a_full_house_in_play_and_advice() {
     let mut s = Sheet::default();
     s.cells[11] = Some(0);
     assert!(rules::scoring_actions(&s, fours).contains(&Action::Write { category: 8 }));
-    assert!(rules::write(&mut s.clone(), fours, Action::CrossOut { category: 8 }).is_err());
+    let mut crossed = s;
+    rules::write(&mut crossed, fours, Action::CrossOut { category: 8 }).unwrap();
+    assert_eq!(crossed.cells[8], Some(0));
     rules::write(&mut s, fours, Action::Write { category: 8 }).unwrap();
     assert_eq!((s.cells[8], s.extra_kniffels), (Some(25), 0));
     // With Kniffel still open, both rows accept it.
@@ -136,6 +142,55 @@ fn five_of_a_kind_is_a_full_house_in_play_and_advice() {
     let report = solver::analyze(&p, &exact_settings(), Cancel::default()).unwrap();
     assert_eq!(report.status, "exact_under_model");
     assert_eq!(report.best_action, Some(Action::Write { category: 8 }));
+}
+#[test]
+fn every_entry_is_allowed_but_analysis_considers_full_scores_only() {
+    let ones = dice(&[1, 1, 1, 1, 1]);
+    let open = Sheet::default();
+    // Fewer of the matching dice may count in the upper section; crossing out is always allowed.
+    assert_eq!(rules::entry_points(&open, ones, 0), [5, 4, 3, 2, 1, 0]);
+    assert_eq!(rules::entry_points(&open, ones, 1), [0]);
+    assert_eq!(
+        rules::entry_points(&open, dice(&[1, 1, 2, 5, 5]), 4),
+        [10, 5, 0]
+    );
+    assert_eq!(
+        rules::entry_points(&open, dice(&[2, 2, 3, 3, 3]), 8),
+        [25, 0]
+    );
+    assert_eq!(rules::entry_points(&open, dice(&[2, 2, 3, 3, 3]), 9), [0]);
+    let mut s = open;
+    rules::write_points(&mut s, ones, 0, 3).unwrap();
+    assert_eq!(s.cells[0], Some(3));
+    assert!(rules::write_points(&mut open.clone(), ones, 0, 6).is_err());
+    assert!(rules::write_points(&mut open.clone(), dice(&[1, 1, 2, 5, 5]), 4, 7).is_err());
+    assert!(rules::write_points(&mut s, ones, 0, 2).is_err());
+
+    // An extra Kniffel scores the maximum anywhere, any lower entry too, and earns its 50 points
+    // whatever is entered.
+    let mut eligible = open;
+    eligible.cells[11] = Some(50);
+    let fours = dice(&[4, 4, 4, 4, 4]);
+    assert_eq!(rules::entry_points(&eligible, fours, 0), [5, 4, 3, 2, 1, 0]);
+    assert_eq!(rules::entry_points(&eligible, fours, 9), [30, 0]);
+    let mut crossed = eligible;
+    rules::write(&mut crossed, fours, Action::CrossOut { category: 12 }).unwrap();
+    assert_eq!((crossed.cells[12], crossed.extra_kniffels), (Some(0), 1));
+
+    // Positions allow every cross-out; analysis only looks at full scores.
+    let mut p = Position::new(1);
+    p.phase = Phase::Decision {
+        dice: dice(&[2, 2, 3, 3, 3]),
+        rerolls_left: 0,
+    };
+    let cross = Action::CrossOut { category: 8 };
+    assert!(p.is_legal(cross));
+    assert!(!p.actions().contains(&cross));
+    assert!(p.actions().contains(&Action::Write { category: 8 }));
+    assert!(!p.is_legal(Action::Write { category: 9 }));
+    p.enter(2, 3).unwrap();
+    assert_eq!(p.players[0].sheet.cells[2], Some(3));
+    assert_eq!(p.phase, Phase::BeforeFirstRoll);
 }
 #[test]
 fn positions_saved_under_the_previous_rules_load_as_current() {

@@ -44,7 +44,7 @@ const GERMAN: &[Section] = &[
         "Unsere Hausregeln",
         &[
             "• Zusatz-Kniffel gibt es nur, wenn im Kniffel-Feld schon 50 stehen. Er bringt 50 Zusatzpunkte, und der Wurf zählt in jedem freien Feld voll: oben fünfmal die Augenzahl, Dreierpasch, Viererpasch und Chance 30, Full House 25, Straßen 30 und 40. Wurde Kniffel gestrichen, gibt es keine Zusatz-Kniffel.",
-            "• Ein Feld, das zum Wurf passt, darf nicht freiwillig gestrichen werden.",
+            "• Welcher Eintrag, entscheidest du: Streichen geht immer, auch wenn der Wurf passt, und oben darfst du weniger Würfel zählen (fünf Einser auch als 1 bis 4). Die App schlägt das nie vor, weil es nie mehr Punkte bringt. Im Spiel: Feld lange antippen.",
             "• Fünf gleiche Würfel zählen auch als Full House, mit den üblichen 25 Punkten.",
             "• Eine Große Straße zählt auch als Kleine Straße.",
         ],
@@ -85,7 +85,7 @@ const ENGLISH: &[Section] = &[
         "House conventions",
         &[
             "• An extra Kniffel only counts with 50 already in the Kniffel row. It earns 50 extra points, and the roll scores in full in any open category: upper rows five times the face, Three and Four of a kind and Chance 30, Full House 25, straights 30 and 40. With Kniffel crossed out, there are no extra Kniffels.",
-            "• A category that fits the roll cannot be crossed out on purpose.",
+            "• The entry is your choice: crossing out is always allowed, also where the roll fits, and the upper section may count fewer dice (five ones also as 1 to 4). The app never suggests it, since it never scores more. In a game: long-press the cell.",
             "• Five of a kind also counts as a Full House, for the usual 25 points.",
             "• A Large Straight also counts as a Small Straight.",
         ],

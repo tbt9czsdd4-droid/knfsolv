@@ -109,6 +109,9 @@ pub fn score(sheet: &Sheet, d: Dice, c: usize) -> u16 {
         ordinary_score(d, c)
     }
 }
+/// The scoring moves worth considering: the full score where the roll fits, otherwise crossing
+/// out. Crossing out a fitting category, or counting fewer dice in the upper section, is allowed
+/// too ([`entry_points`]) but never scores more, so analysis leaves those entries out.
 pub fn scoring_actions(sheet: &Sheet, d: Dice) -> Vec<Action> {
     (0..13)
         .filter(|&c| sheet.cells[c].is_none())
@@ -121,6 +124,40 @@ pub fn scoring_actions(sheet: &Sheet, d: Dice) -> Vec<Action> {
         })
         .collect()
 }
+/// Every entry the roll allows in open category `c`, highest first: the full score where the
+/// roll fits, in the upper section also fewer of the matching dice (five ones: 5, 4, 3, 2, 1),
+/// and crossing out with zero, which is always allowed.
+pub fn entry_points(sheet: &Sheet, d: Dice, c: usize) -> Vec<u16> {
+    let full = score(sheet, d, c);
+    if c < 6 {
+        let face = c as u16 + 1;
+        (0..=full / face).rev().map(|k| k * face).collect()
+    } else if full > 0 {
+        vec![full, 0]
+    } else {
+        vec![0]
+    }
+}
+/// Enters `points` in `category`, one of [`entry_points`]. A roll that earns an extra Kniffel
+/// earns its 50 points whatever the entry.
+pub fn write_points(sheet: &mut Sheet, d: Dice, category: usize, points: u16) -> Result<()> {
+    if category >= 13 || sheet.cells[category].is_some() {
+        return Err(Error::Invalid(
+            "Category is already filled or invalid".into(),
+        ));
+    }
+    if !entry_points(sheet, d, category).contains(&points) {
+        return Err(Error::Invalid(
+            "This entry is not legal for these dice".into(),
+        ));
+    }
+    if extra_eligible(sheet, d) {
+        sheet.extra_kniffels += 1;
+    }
+    sheet.cells[category] = Some(points);
+    Ok(())
+}
+/// Writes the full score (which must be positive) or crosses out (always allowed).
 pub fn write(sheet: &mut Sheet, d: Dice, action: Action) -> Result<()> {
     let (category, cross) = match action {
         Action::Write { category } => (category, false),
@@ -132,15 +169,11 @@ pub fn write(sheet: &mut Sheet, d: Dice, action: Action) -> Result<()> {
             "Category is already filled or invalid".into(),
         ));
     }
-    let points = score(sheet, d, category);
-    if cross != (points == 0) {
+    let points = if cross { 0 } else { score(sheet, d, category) };
+    if !cross && points == 0 {
         return Err(Error::Invalid(
             "This entry is not legal for these dice".into(),
         ));
     }
-    if extra_eligible(sheet, d) {
-        sheet.extra_kniffels += 1;
-    }
-    sheet.cells[category] = Some(points);
-    Ok(())
+    write_points(sheet, d, category, points)
 }
