@@ -460,6 +460,9 @@ The help page and [rules.md](rules.md) describe both.
 - After one online start, the Home Screen app cold-starts in airplane mode and analyzes a position.
 - A new deployment shows the update banner and updates without losing the position.
 
+**Status (2026-10-21): step 1 of 4 done.** The steps: publishing; manifest, icon, and Home Screen; service worker and update banner; install hint and „App teilen“.
+1. Done: publishing (D8). This repository is public at <https://github.com/tbt9czsdd4-droid/knfsolv>. The rulebook PDF was removed from the whole history before the old GitHub repository was replaced, commits use GitHub's noreply address, and the README opens with a disclaimer that the project is entirely AI-generated. The checks workflow builds the web app for `/knfsolv/` and deploys every master push that passes all checks to <https://tbt9czsdd4-droid.github.io/knfsolv/>; the `github-pages` environment allows `master` (enabling Pages on the empty repository had preset `main`). Headless Firefox completes an analysis there. A long-press interface test that failed on the slower CI machines (a real analysis report moved the sheet between frames) now uses recorded analysis.
+
 ### Phase 7 — iPhone testing, polish, documentation (2–3 days)
 
 **Tasks:**
