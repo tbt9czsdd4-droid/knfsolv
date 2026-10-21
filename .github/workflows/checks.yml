@@ -46,4 +46,27 @@ jobs:
           tool: trunk
       - name: Trunk release build
         working-directory: web
-        run: trunk build --release
+        run: trunk build --release --public-url "/${{ github.event.repository.name }}/"
+      - name: Keep the build for GitHub Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: web/dist
+
+  deploy:
+    name: GitHub Pages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [native, web]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

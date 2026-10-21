@@ -1,6 +1,6 @@
 # iPhone web app plan
 
-Status: Phases 0–5 done (2026-10-08; Pages deployment postponed; the family test of Phase 4 is still open). This replaces the earlier draft (commit `edcef33`).
+Status: Phases 0–5 done (2026-10-08), followed by two house rules (see after Phase 5). Deployment decided on 2026-10-21 (D8); Phase 6 is next. The family test of Phase 4 is still open. This replaces an earlier draft.
 Sources: [the brainstorm](iphone-web-app-brainstorm.md), code inspection, and measurements taken on 2026-10-04 (section 3).
 
 ## 1. Goal
@@ -256,13 +256,15 @@ A GitHub Actions workflow builds with `trunk build --release --public-url /<repo
 
 | Option | Notes |
 | --- | --- |
-| **Keep the source private; deploy the built `dist/` to a separate public repository** (recommended) | Only the compiled app is public. Needs one access token as an Actions secret. |
-| Make this repository public | Simplest, but first remove the PDF; it would also stay reachable in git history unless history is rewritten |
+| Keep the source private; deploy the built `dist/` to a separate public repository | Only the compiled app is public. Needs one access token as an Actions secret. |
+| **Make this repository public** ✅ | Simplest, but first remove the PDF; it would also stay reachable in git history unless history is rewritten |
 | GitHub Pro | Pages from the private repository, about $4/month |
 
 The resulting URL contains the GitHub user name. That is fine with a QR code; a custom domain is optional.
 
 **Decision (2026-10-05): postponed.** Phase 1 adds the checks workflow only. Development and phone tests use `web/serve-lan.sh` until one of the options above is chosen; it has to be settled before the family uses the app.
+
+**Decision (2026-10-21): make this repository public.** The rulebook PDF is removed from the whole history first; it stays only in local working copies. The checks workflow deploys every master push that passes all checks.
 
 ## 5. Architecture
 
@@ -438,7 +440,13 @@ Estimates are focused working days. Each phase ends with something testable on t
 2. Done: desktop layout. The toolbar, dice panel, score sheets, advice panel, and move cards go through `t()`, hover help included; category names follow the language, and win/tie/lose percentages and the expected score use `percent`/`decimal`. The engine's status and confidence identifiers become words („Beendet · geschätzt · Sicherheit: niedrig“), and *Analysis details* is „Technische Details“, whose engine terms stay English as planned. „Stellung ersetzen“ („Aktuelle Stellung verwerfen?“) opens centered with a fixed id, fits 312 points with a gutter, and has two 44-point buttons; the desktop's unsaved-changes dialog is centered too. Left for step 3: the settings window, messages, and engine errors; the desktop-only file controls (*Session path*, *Load session*) stay English because the web app never shows them.
 3. Done: settings and messages. One `settings_ui` serves the desktop window and, below 600 points, a page of its own („‹ Zurück“ · „Erweitert“, tabs *Berechnung* / *Spiel*): choices are rows of 44-point buttons instead of combo boxes, number and text fields are 44 points tall, and the mouse-wheel setting and file paths are left out where they cannot apply (paths only exist without a browser). All settings texts are German, including the model, objective, and method names. Messages go through `t()` („Zug ausgeführt.“, „Computer würfelt 2 3 3 5 6.“, „Computer: Dreierpasch eintragen · jetzt 16 Punkte.“, „Denkt nach …“). Engine errors pass `i18n::error_text`: the messages users can trigger have German wording (a test checks that each still exists in the engine), messages with a known beginning keep their detail, and anything else reads „Etwas ist schiefgegangen: …“ with the original. The computer's English selection reasons stay out of the German interface. The preferences error window is translated and anchored. „←“, missing from egui's fonts, became „⬅“. Noted for step 4: number fields (`DragValue`) show 20000 without grouping.
 4. Done: German numbers and a test for English on screen. egui's number fields (`DragValue`) use `i18n::german_number` in German („20 000“; egui's parser skips the spaces), switched with the language like the zoom; the remaining hand-formatted numbers are only under *Technische Details*. The web shell's file and storage errors are German. `normal_flows_show_no_english_in_german` renders, at 390×844, 874×402, and 1180×900 and with a browser as in the web app: the start and setup screens; the analyzer before and after the roll with a report, the picker, the player sheet, both settings tabs, applied advice, the replace dialog, and sheets that do not fit; local games with real and app dice; a game against the computer on both turns; and the results. It fails on any text that is a table entry's English or contains a word from an English-only list, and checks itself on an English screen. It found and fixed: English default names in the desktop's „Stellung eingeben“ („Player 1“) and the engine's model identifier in the desktop computer setup (now „Modell: Chancen (alt)“).
-5. Done: *Hilfe & Regeln* (`src/gui/help.rs`), from the ☰ menu, the phone's start screen, and the desktop toolbar and start screen: a page with „‹ Zurück“ below 600 points, a window above. It explains the app (copying sheets, entering the roll, *Übernehmen*, the player sheet, Undo, automatic saving), what the numbers mean (chance of winning, Ø points, close calls, and why the advice is cautious), the standard rules, and the house conventions of [rules.md](rules.md) (extra Kniffels only with 50 entered, fitting categories cannot be crossed out, a large straight is also small, five of a kind is no Full House). The prose is written out in German and English rather than through `t()`. In the browser, „App weitergeben“ shows a QR code (`qrcodegen`, drawn dark on white with the quiet zone; a screenshot decodes with `rqrr`) of the app's address without its query, with the address and the note that Safari and the Home Screen app store separately. Until deployment, the address is the LAN one of `serve-lan.sh`. „Über die App“ (version, diagnostics) is left for Phases 6 and 7.
+5. Done: *Hilfe & Regeln* (`src/gui/help.rs`), from the ☰ menu, the phone's start screen, and the desktop toolbar and start screen: a page with „‹ Zurück“ below 600 points, a window above. It explains the app (copying sheets, entering the roll, *Übernehmen*, the player sheet, Undo, automatic saving), what the numbers mean (chance of winning, Ø points, close calls, and why the advice is cautious), the standard rules, and the house conventions of [rules.md](rules.md) (at the time: extra Kniffels only with 50 entered, fitting categories cannot be crossed out, a large straight is also small, five of a kind is no Full House; two of these changed afterwards, see below). The prose is written out in German and English rather than through `t()`. In the browser, „App weitergeben“ shows a QR code (`qrcodegen`, drawn dark on white with the quiet zone; a screenshot decodes with `rqrr`) of the app's address without its query, with the address and the note that Safari and the Home Screen app store separately. Until deployment, the address is the LAN one of `serve-lan.sh`. „Über die App“ (version, diagnostics) is left for Phases 6 and 7.
+
+**After Phase 5 (2026-10-08): two house rules**, as the family plays.
+- Five of a kind counts as a Full House (25 points, whether or not Kniffel is open). The rules version is now `schmidt_pdf_2024_house_v2`; v1 positions, including the phone's autosave, load as current ones, and the bundled continuation model was retrained.
+- Every entry is the player's choice: crossing out is always allowed, and the upper section may count fewer of the matching dice. In games, a long press (right-click on the desktop) on an open cell offers every entry; a tap still writes the full score. Analysis keeps considering only the full score, since the other entries never score more.
+
+The help page and [rules.md](rules.md) describe both.
 
 ### Phase 6 — Install and offline (1–2 days)
 
@@ -512,8 +520,7 @@ Estimates are focused working days. Each phase ends with something testable on t
 
 ## 10. Open questions
 
-1. **Deployment repository** (postponed on 2026-10-05): keep the source private and deploy to a separate public repository (recommended), make this repository public after removing the rulebook PDF, or use GitHub Pro?
-2. **Desktop language:** keep English (recommended), or switch to German as well?
-3. **Oldest iPhone/iOS** in the family? The plan targets iOS 16.4 or newer.
+1. **Desktop language:** keep English (recommended), or switch to German as well?
+2. **Oldest iPhone/iOS** in the family? The plan targets iOS 16.4 or newer.
 
-Answered: the app name is Kniffel-Coach (2026-10-05).
+Answered: the app name is Kniffel-Coach (2026-10-05); this repository is made public for the deployment (2026-10-21, D8).

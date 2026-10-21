@@ -1,6 +1,6 @@
 # Standard Kniffel rules used by the engine
 
-Source: the standard section of the supplied [Schmidt rulebook](../49030_Kniffel_DE.pdf), PDF pages 2–3. Saved positions use `schmidt_pdf_2024_house_v2`: these rules with the house conventions below. Files saved as `schmidt_pdf_2024_standard_v1` (before five of a kind counted as a Full House) load as current positions, since their sheets are valid under both; models and caches trained under v1 are rejected.
+Source: the standard section of the Schmidt Spiele rulebook (Kniffel, item 49030, German; pages 2–3 of its PDF, which is not part of this repository). Saved positions use `schmidt_pdf_2024_house_v2`: these rules with the house conventions below. Files saved as `schmidt_pdf_2024_standard_v1` (before five of a kind counted as a Full House) load as current positions, since their sheets are valid under both; models and caches trained under v1 are rejected.
 
 | JSON index / TUI number | Category | Points |
 | --- | --- | --- |

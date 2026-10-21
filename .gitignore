@@ -1,3 +1,5 @@
 /target/
 /web/dist/
 /web/.tls/
+# The Schmidt rulebook is copyrighted; keep it local only.
+/49030_Kniffel_DE.pdf
