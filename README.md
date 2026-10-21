@@ -1,8 +1,13 @@
 # knfsolv
 
+> [!WARNING]
+> **This is AI slop: 100% AI-generated.** Every line in this repository (the Rust code, the tests, the web app, the documentation, and this README) was written by an AI, Claude (Anthropic), through Claude Code. A human described what to build, made the decisions, and tried the results, but did not write the code. Expect the mistakes, verbosity, and odd choices that come with that. Use it at your own risk.
+>
+> Kniffel is a trademark of Schmidt Spiele. This is a private hobby project, not affiliated with or endorsed by Schmidt Spiele.
+
 A Rust Kniffel engine with desktop and terminal score sheets. Enter every player's sheet, the active player, current dice, and rerolls remaining. Get advice for retaining dice or scoring a category, with alternatives and estimated winning chances.
 
-Uses **standard Kniffel only**, following the included Schmidt rulebook and the explicit conventions in [docs/rules.md](docs/rules.md).
+Uses **standard Kniffel only**, following the Schmidt rulebook (not included in this repository) and the explicit conventions in [docs/rules.md](docs/rules.md).
 
 ## Run
 
