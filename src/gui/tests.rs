@@ -3720,7 +3720,13 @@ fn secondary_click(app: &mut Desktop, ctx: &egui::Context, pos: egui::Pos2, size
 }
 
 fn local_game_with_roll(faces: [u8; 5]) -> Desktop {
-    let mut app = startup(Session::new(2), None);
+    // Recorded analysis: a real report arriving between two frames would move the sheet
+    // under the pointer (it did on slower CI machines).
+    let dir = tempfile::tempdir().unwrap();
+    let preferences = crate::persistence::FileStorage(dir.keep().join("preferences.json"));
+    let mut app = Desktop::startup_with(Session::new(2), None, preferences, |_| {
+        Box::new(Recorder::default())
+    });
     app.execute(Pending::Local(app.local_setup.clone()));
     for face in faces {
         app.choose_face(face, Instant::now());
